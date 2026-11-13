@@ -1,13 +1,12 @@
-// Assistente da Sabrina: resumo do dia, chat com IA (Claude) e notificações no celular.
+// Assistente da Sabrina: resumo do dia, chat com IA (Gemini, nível pago) e notificações no celular.
 // POST com login de admin:
 //   {acao:'chat', mensagens:[{role,content}]}  conversa (sem mensagens = resumo do dia escrito pela IA)
 //   {acao:'chave'}                              chave pública para inscrever o celular nas notificações
 //   {acao:'testar'}                             manda uma notificação de teste
 // POST do pg_cron com header x-cron = crm_config.cron_key: notificação "seu resumo de hoje".
-// Secrets: ANTHROPIC_API_KEY, GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET.
+// Secrets: GEMINI_API_KEY (chave de um projeto com faturamento = nível pago), GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET.
 import { createClient } from 'jsr:@supabase/supabase-js@2';
 import * as webpush from 'jsr:@negrel/webpush@^0.5.0';
-import Anthropic from 'npm:@anthropic-ai/sdk';
 
 const SUPA = Deno.env.get('SUPABASE_URL')!, SR = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 const env = (k: string) => Deno.env.get(k) ?? '';
@@ -80,25 +79,28 @@ Você ainda não consegue alterar nada no CRM; se ela pedir para mudar algo, exp
 Status das entregas: a_fazer, produzindo, enviado, revisao, aprovado. Etapas do funil: contato, diagnostico, proposta, negociacao, ganho, perdido.
 Quando ela pedir o resumo do dia, organize em: agenda de hoje, entregas com prazo hoje ou atrasadas, dinheiro a receber hoje ou atrasado, próximos passos do funil vencendo, e termine com uma sugestão prática de prioridade. Se o dia estiver vazio, diga isso com leveza.`;
 
-const anthropic = new Anthropic(); // lê ANTHROPIC_API_KEY
+const MODELO = 'gemini-3.8-flash';
 
 async function conversar(mensagens: { role: 'user' | 'assistant'; content: string }[]) {
   const dados = await retrato();
   const msgs = mensagens.length ? mensagens : [{ role: 'user' as const, content: 'Bom dia! Me dá o resumo de hoje?' }];
-  const r: any = await anthropic.beta.messages.create({
-    model: 'claude-opus-5-5',
-    max_tokens: 16000,
-    betas: ['server-side-fallback-2026-07-01'],
-    fallbacks: 'default', // se o Opus recusar por política, a API refaz em outro modelo
-    output_config: { effort: 'low' },
-    system: [
-      { type: 'text', text: SISTEMA },
-      { type: 'text', text: 'DADOS DO CRM (atualizados agora):\n' + JSON.stringify(dados), cache_control: { type: 'ephemeral' } },
-    ],
-    messages: msgs,
-  } as any);
-  if (r.stop_reason === 'refusal') return 'Desculpe, não consegui responder isso. Pode perguntar de outro jeito?';
-  return r.content.filter((b: any) => b.type === 'text').map((b: any) => b.text).join('\n').trim() || 'Não consegui montar uma resposta agora.';
+  const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${MODELO}:generateContent`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-goog-api-key': env('GEMINI_API_KEY') },
+    body: JSON.stringify({
+      systemInstruction: { parts: [{ text: SISTEMA + '
+
+DADOS DO CRM (atualizados agora):
+' + JSON.stringify(dados) }] },
+      contents: msgs.map(m => ({ role: m.role === 'assistant' ? 'model' : 'user', parts: [{ text: m.content }] })),
+      generationConfig: { maxOutputTokens: 4096 },
+    }),
+  });
+  const j = await r.json();
+  if (!r.ok) { console.error('gemini', r.status, j.error?.message); throw new Error(`IA indisponível (${r.status}). Tente de novo em instantes.`); }
+  if (j.promptFeedback?.blockReason) return 'Desculpe, não consegui responder isso. Pode perguntar de outro jeito?';
+  const texto = (j.candidates?.[0]?.content?.parts ?? []).map((p: any) => p.text ?? '').join('').trim();
+  return texto || 'Não consegui montar uma resposta agora.';
 }
 
 /* ---------- notificações ---------- */
@@ -155,7 +157,7 @@ Deno.serve(async req => {
       case 'chave': return json({ publica: (await servidorPush()).publica });
       case 'testar': return json(await notificar('Rovya ✦', 'As notificações estão funcionando neste aparelho.'));
       case 'chat': {
-        if (!env('ANTHROPIC_API_KEY')) return json({ erro: 'Assistente ainda não configurado (falta ANTHROPIC_API_KEY nos secrets).' }, 503);
+        if (!env('GEMINI_API_KEY')) return json({ erro: 'Assistente ainda não configurado (falta GEMINI_API_KEY nos secrets).' }, 503);
         const msgs = (Array.isArray(b.mensagens) ? b.mensagens : []).slice(-20)
           .filter((m: any) => (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string' && m.content.trim())
           .map((m: any) => ({ role: m.role, content: m.content.slice(0, 4000) }));
@@ -166,6 +168,6 @@ Deno.serve(async req => {
     return json({ erro: 'Ação desconhecida' }, 400);
   } catch (e) {
     console.error(e);
-    return json({ erro: e instanceof Anthropic.APIError ? `IA indisponível (${e.status}). Tente de novo em instantes.` : (e as Error).message }, 500);
+    return json({ erro: (e as Error).message }, 500);
   }
 });
