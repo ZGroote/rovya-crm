@@ -1,5 +1,9 @@
 # Rovya · CRM de gestão
 
+**No ar:** https://zgroote.github.io/rovya-crm/ (GitHub Pages, repositório ZGroote/rovya-crm). Para instalar no celular: iPhone → Safari → Compartilhar → Adicionar à Tela de Início; Android → Chrome → menu ⋮ → Instalar app.
+
+Ao mudar arquivos, aumente o `?v=` do app.js/app.css no app.html para o navegador não usar a versão antiga. O `supabase/002_seed.sql` (textos do método da Sabrina) fica fora do GitHub de propósito.
+
 Site estático (HTML + JS, sem build) com dados no Supabase, projeto **rovya-stickers** (o mesmo das figurinhas). As tabelas do CRM começam com `crm_`.
 
 - `login.html`: login da rosa. Só entra quem está na tabela `admins` (hoje: rovyacreative@gmail.com, a mesma senha da Área da Rovya das figurinhas).
