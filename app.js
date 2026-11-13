@@ -67,7 +67,7 @@ if (!session) location.replace('login.html');
 $('#sair').onclick = async () => { await sb.auth.signOut(); location.replace('login.html'); };
 
 /* ---------- roteador ---------- */
-const rotas = { '': inicio, funil, clientes, cliente, projetos, projeto, financeiro, agenda, modelos };
+const rotas = { '': inicio, funil, clientes, cliente, projetos, projeto, financeiro, agenda, modelos, assistente };
 async function rotear() {
   const [r, id] = location.hash.replace(/^#\/?/, '').split('/');
   const fn = rotas[r] || inicio;
@@ -437,11 +437,12 @@ async function modelos() {
 document.addEventListener('click', e => { if (e.target.id === 'copiar') { navigator.clipboard.writeText($('#dlgf').elements.t.value); toast('Copiado'); } });
 
 /* ---------- AGENDA (Google, pela Edge Function crm-google) ---------- */
-async function google(acao, dados = {}) {
+async function funcao(nome, acao, dados = {}) {
   const { data: { session } } = await sb.auth.getSession();
-  const r = await fetch(`${SUPABASE_URL}/functions/v1/crm-google`, { method: 'POST', headers: { Authorization: 'Bearer ' + session.access_token, 'Content-Type': 'application/json' }, body: JSON.stringify({ acao, ...dados }) });
-  const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.erro || 'Falha na agenda (' + r.status + ')'); return j;
+  const r = await fetch(`${SUPABASE_URL}/functions/v1/${nome}`, { method: 'POST', headers: { Authorization: 'Bearer ' + session.access_token, 'Content-Type': 'application/json' }, body: JSON.stringify({ acao, ...dados }) });
+  const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.erro || 'Falha (' + r.status + ')'); return j;
 }
+const google = (acao, dados) => funcao('crm-google', acao, dados);
 const horaEv = e => e.start?.dateTime ? new Date(e.start.dateTime).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : 'dia todo';
 async function novoEvento(val = {}, ev = null) {
   const cs = await listaClientes();
@@ -488,5 +489,72 @@ async function agenda() {
   $('#nEv').onclick = async () => { if (await novoEvento()) { toast('Criado no Google Agenda'); agenda(); } };
   $('#desc').onclick = async () => { if (await confirma('Desconectar o Google Agenda?')) { await google('desconectar'); agenda(); } };
 }
+
+/* ---------- ASSISTENTE (IA + notificações, pela Edge Function crm-assistente) ---------- */
+const PEDIDO_RESUMO = 'Bom dia! Me dá o resumo de hoje?';
+const chaveChat = () => 'rovya-chat-' + hoje();
+const lerChat = () => { try { return JSON.parse(localStorage.getItem(chaveChat())) || []; } catch { return []; } };
+const gravarChat = m => { try { localStorage.setItem(chaveChat(), JSON.stringify(m.slice(-40))); } catch { } };
+// negrito e listas simples nas respostas da IA
+const fmtIA = t => esc(t).replace(/\*\*(.+?)\*\*/g, '<b>$1</b>').replace(/^#{1,4}\s*(.+)$/gm, '<b>$1</b>').replace(/\n/g, '<br>');
+
+async function assistente() {
+  let msgs = lerChat();
+  main.innerHTML = `<div class="topo"><div><div class="eyebrow">Sua assistente</div><h1>Assistente</h1><p>Pergunte sobre clientes, projetos, prazos, agenda e dinheiro.</p></div>
+    <div class="acoes" id="avisos"></div></div>
+    <section class="chat card"><div class="msgs" id="msgs"></div>
+      <form class="enviar" id="fChat"><textarea id="pergunta" rows="1" placeholder="Pergunte algo… (ex.: o que falta na Conecta?)"></textarea><button class="bt" id="bEnviar">Enviar</button></form>
+      <div class="sugestoes">${['O que é prioridade hoje?', 'Quanto tenho a receber este mês?', 'Quem está sem resposta há mais tempo?', 'Como está cada projeto?'].map(s => `<button type="button" class="bt peq sec">${s}</button>`).join('')}</div>
+    </section>`;
+  const caixa = $('#msgs');
+  const desenhar = (pensando) => {
+    caixa.innerHTML = msgs.filter(m => !m.oculta).map(m => `<div class="msg ${m.role === 'user' ? 'eu' : 'ia'}">${m.role === 'user' ? esc(m.content) : fmtIA(m.content)}</div>`).join('')
+      + (pensando ? '<div class="msg ia pensando"><i></i><i></i><i></i></div>' : '');
+    caixa.scrollTop = caixa.scrollHeight;
+  };
+  const perguntar = async texto => {
+    if (texto) msgs.push({ role: 'user', content: texto });
+    $('#bEnviar').disabled = true; desenhar(true);
+    try {
+      const { resposta } = await funcao('crm-assistente', 'chat', { mensagens: msgs.map(({ role, content }) => ({ role, content })) });
+      msgs.push({ role: 'assistant', content: resposta }); gravarChat(msgs);
+    } catch (e) { msgs.push({ role: 'assistant', content: '⚠️ ' + e.message }); }
+    $('#bEnviar') && ($('#bEnviar').disabled = false); desenhar();
+  };
+  desenhar();
+  if (!msgs.length) { msgs.push({ role: 'user', content: PEDIDO_RESUMO, oculta: true }); perguntar(); } // resumo do dia ao abrir
+  $('#fChat').onsubmit = e => { e.preventDefault(); const t = $('#pergunta').value.trim(); if (!t) return; $('#pergunta').value = ''; perguntar(t); };
+  $('#pergunta').onkeydown = e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); $('#fChat').requestSubmit(); } };
+  main.querySelectorAll('.sugestoes button').forEach(b => b.onclick = () => perguntar(b.textContent));
+  avisoNotificacoes();
+}
+
+// notificações no celular (Web Push). No iPhone só funciona com o app instalado na tela de início.
+async function avisoNotificacoes() {
+  const el = $('#avisos'); if (!el) return;
+  const suporta = 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+  const ios = /iphone|ipad/i.test(navigator.userAgent), instalado = matchMedia('(display-mode: standalone)').matches || navigator.standalone;
+  if (!suporta) { el.innerHTML = ios && !instalado ? '<small class="mute">Para receber notificações no iPhone: Compartilhar → Adicionar à Tela de Início, e abra pelo ícone.</small>' : ''; return; }
+  const reg = await navigator.serviceWorker.ready;
+  const inscrito = await reg.pushManager.getSubscription();
+  if (inscrito && Notification.permission === 'granted') {
+    el.innerHTML = '<button class="bt peq sec" id="bTestar">Testar notificação</button>';
+    $('#bTestar').onclick = async () => { const r = await funcao('crm-assistente', 'testar'); toast(r.enviadas ? 'Notificação enviada' : 'Nenhum aparelho recebeu'); };
+    return;
+  }
+  if (Notification.permission === 'denied') { el.innerHTML = '<small class="mute">Notificações bloqueadas nas configurações do navegador.</small>'; return; }
+  el.innerHTML = '<button class="bt sec" id="bNotif">🔔 Receber resumo às 7h30</button>';
+  $('#bNotif').onclick = async () => {
+    try {
+      if (await Notification.requestPermission() !== 'granted') { toast('Permissão negada', true); return; }
+      const { publica } = await funcao('crm-assistente', 'chave');
+      const bytes = Uint8Array.from(atob(publica.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat((4 - publica.length % 4) % 4)), c => c.charCodeAt(0));
+      const s = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: bytes });
+      await q(sb.from('crm_push').upsert({ endpoint: s.endpoint, inscricao: s.toJSON() }));
+      toast('Pronto! Você vai receber o resumo toda manhã'); avisoNotificacoes();
+    } catch (e) { toast('Não consegui ativar: ' + e.message, true); }
+  };
+}
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => { });
 
 rotear();
