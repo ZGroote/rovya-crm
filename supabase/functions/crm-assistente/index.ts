@@ -88,10 +88,7 @@ async function conversar(mensagens: { role: 'user' | 'assistant'; content: strin
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'x-goog-api-key': env('GEMINI_API_KEY') },
     body: JSON.stringify({
-      systemInstruction: { parts: [{ text: SISTEMA + '
-
-DADOS DO CRM (atualizados agora):
-' + JSON.stringify(dados) }] },
+      systemInstruction: { parts: [{ text: `${SISTEMA}\n\nDADOS DO CRM (atualizados agora):\n${JSON.stringify(dados)}` }] },
       contents: msgs.map(m => ({ role: m.role === 'assistant' ? 'model' : 'user', parts: [{ text: m.content }] })),
       generationConfig: { maxOutputTokens: 4096 },
     }),
