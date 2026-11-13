@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="img/icon-512.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Rovya">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="icon" href="img/favicon.png">
+<title>Rovya · Entrar</title>
+<meta name="theme-color" content="#0b0607">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;1,400&family=Inter:wght@300;400;500&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#0b0607;--ink:#f3ebe3;--mute:#a8978c;--gold:#c9a063;--wine:#8e0f1d;--err:#e0727c;
+  --rh:min(82vh,760px);--rw:calc(var(--rh)*564/842);--abre:clamp(150px,22vw,230px)}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);font:300 15px/1.5 Inter,system-ui,sans-serif;overflow:hidden}
+body{background:radial-gradient(ellipse 60% 55% at 50% 45%,#1f0d10 0%,var(--bg) 70%)}
+
+.cena{position:fixed;inset:0;display:grid;place-items:center;perspective:1400px}
+.rosa{position:absolute;left:50%;top:50%;width:var(--rw);height:var(--rh);transform:translate(-50%,-50%);transform-style:preserve-3d}
+.metade{position:absolute;top:0;width:50%;height:100%;background:url(img/rosa.webp) no-repeat;background-size:200% 100%;
+  transition:transform 1.1s cubic-bezier(.7,0,.15,1),filter 1.1s;filter:brightness(.72) saturate(.9)}
+.esq{left:0;background-position:left top;transform:translateX(calc(-1*var(--abre))) rotateY(14deg);transform-origin:left center}
+.dir{right:0;background-position:right top;transform:translateX(var(--abre)) rotateY(-14deg);transform-origin:right center}
+.fechada .esq,.fechada .dir{transform:none;filter:none}
+/* o fio de luz na emenda */
+.emenda{position:absolute;left:50%;top:50%;width:2px;height:calc(var(--rh)*.6);transform:translate(-50%,-50%) scaleY(.4);opacity:0;z-index:3;
+  background:linear-gradient(transparent,#ffe6b0 30%,#fff 50%,#ffe6b0 70%,transparent);filter:blur(.5px);box-shadow:0 0 18px 4px #c9a06388}
+
+form{position:relative;z-index:2;width:min(300px,calc(100vw - 2*var(--abre) + 90px),calc(100vw - 48px));
+  display:grid;gap:14px;text-align:center;transition:opacity .45s,transform .45s}
+.marca{font:400 .78rem/1 Inter;letter-spacing:.42em;color:var(--gold);margin:0 0 2px;padding-left:.42em}
+h1{font:italic 400 2.1rem/1.1 'Cormorant Garamond',serif;margin:0 0 10px}
+label{display:block;text-align:left;font-size:.7rem;letter-spacing:.18em;text-transform:uppercase;color:var(--mute)}
+input{width:100%;margin-top:6px;padding:11px 2px;background:transparent;border:0;border-bottom:1px solid #c9a06355;
+  color:var(--ink);font:400 1rem Inter;outline:none;transition:border-color .3s}
+input:focus{border-bottom-color:var(--gold)}
+button{margin-top:10px;padding:14px;border:1px solid var(--gold);background:#c9a06312;color:var(--ink);cursor:pointer;
+  font:500 .78rem Inter;letter-spacing:.3em;text-transform:uppercase;transition:background .3s}
+button:hover,button:focus-visible{background:#c9a06330;outline:none}
+button[disabled]{opacity:.5;cursor:progress}
+.msg{min-height:1.4em;margin:0;font-size:.82rem;color:var(--err)}
+.esqueci{font-size:.78rem;color:var(--mute);text-decoration:none}
+.esqueci:hover{color:var(--gold)}
+.saindo form{opacity:0;transform:scale(.94);pointer-events:none}
+
+/* erro: a caixa não abre */
+.trancada .esq{animation:tranca .5s}
+.trancada .dir{animation:tranca2 .5s}
+@keyframes tranca{30%{transform:translateX(calc(-1*var(--abre) + 14px)) rotateY(10deg)}60%{transform:translateX(calc(-1*var(--abre) - 4px)) rotateY(15deg)}}
+@keyframes tranca2{30%{transform:translateX(calc(var(--abre) - 14px)) rotateY(-10deg)}60%{transform:translateX(calc(var(--abre) + 4px)) rotateY(-15deg)}}
+
+/* a chave gira e a caixa abre */
+.girando .rosa{transition:transform 1s cubic-bezier(.6,0,.3,1);transform:translate(-50%,-50%) rotateY(90deg)}
+.girando .emenda{animation:fio 1s forwards}
+@keyframes fio{0%{opacity:0}40%{opacity:1}100%{opacity:1;transform:translate(-50%,-50%) scaleY(1.25)}}
+.luz{position:fixed;inset:0;z-index:5;pointer-events:none;background:radial-gradient(ellipse at center,#fff3df,#e9d7bd 40%,#0b0607 100%);
+  clip-path:inset(0 50% 0 50%);opacity:0}
+.abrindo .luz{opacity:1;transition:clip-path .9s cubic-bezier(.7,0,.2,1),opacity .2s;clip-path:inset(0 0 0 0)}
+
+@media (max-width:600px){:root{--rh:min(60vh,520px);--abre:36vw}form{width:calc(100vw - 2*var(--abre) + 96px)}}
+@media (prefers-reduced-motion:reduce){.metade,.rosa,form{transition:none!important;animation:none!important}}
+</style>
+</head>
+<body>
+<main class="cena" id="cena">
+  <div class="rosa" aria-hidden="true">
+    <div class="metade esq"></div>
+    <div class="metade dir"></div>
+  </div>
+  <div class="emenda" aria-hidden="true"></div>
+  <form id="f" novalidate>
+    <p class="marca">ROVYA</p>
+    <h1>Bem-vinda de volta</h1>
+    <label>E-mail<input id="email" type="email" autocomplete="username" required></label>
+    <label>Senha<input id="senha" type="password" autocomplete="current-password" required></label>
+    <button id="b">Entrar</button>
+    <p class="msg" id="msg" role="alert"></p>
+    <a class="esqueci" href="#" id="esqueci">Esqueci minha senha</a>
+  </form>
+</main>
+<div class="luz"></div>
+<script>
+// guarda antes do Supabase limpar a URL: veio do e-mail de "esqueci minha senha"?
+window.veioRecuperar = /[?&]recuperar=1/.test(location.search) || /type=recovery/.test(location.hash);
+</script>
+<script type="module">
+import { sb } from './config.js';
+const $=id=>document.getElementById(id), cena=document.body, espera=ms=>new Promise(r=>setTimeout(r,ms));
+const reduzido=matchMedia('(prefers-reduced-motion: reduce)').matches;
+let recuperando=false;
+
+async function entrar(email,senha){
+  const { error } = await sb.auth.signInWithPassword({ email, password: senha });
+  if(error) throw new Error(/invalid/i.test(error.message)?'E-mail ou senha incorretos.':error.message);
+  const { data: admin } = await sb.rpc('is_admin');
+  if(!admin){ await sb.auth.signOut(); throw new Error('Este acesso não tem permissão.'); }
+}
+async function abrir(){
+  if(reduzido){ location.replace('app.html'); return; }
+  cena.classList.add('saindo'); await espera(250);
+  cena.classList.add('fechada'); await espera(1150);   // as metades se encontram
+  cena.classList.add('girando'); await espera(800);    // a chave gira
+  cena.classList.add('abrindo'); await espera(950);    // a caixa abre
+  location.replace('app.html');
+}
+function tranca(msg){ $('msg').textContent=msg; $('b').disabled=false; cena.classList.remove('trancada'); void cena.offsetWidth; cena.classList.add('trancada'); }
+
+$('f').addEventListener('submit',async e=>{
+  e.preventDefault(); $('msg').textContent='';
+  const email=$('email').value.trim(), senha=$('senha').value;
+  $('b').disabled=true;
+  try{
+    if(recuperando){
+      if(senha.length<8) throw new Error('Use pelo menos 8 caracteres.');
+      const { error } = await sb.auth.updateUser({ password: senha }); if(error) throw error;
+    } else {
+      if(!email||!senha) throw new Error('Preencha e-mail e senha.');
+      await entrar(email,senha);
+    }
+  }catch(err){ tranca(err.message); return; }
+  abrir();
+});
+$('esqueci').addEventListener('click',async e=>{
+  e.preventDefault(); const email=$('email').value.trim();
+  if(!email){ $('msg').textContent='Digite seu e-mail acima e toque de novo.'; $('email').focus(); return; }
+  const { error } = await sb.auth.resetPasswordForEmail(email,{ redirectTo: location.origin + location.pathname + '?recuperar=1' });
+  $('msg').style.color='var(--gold)'; $('msg').textContent=error?error.message:'Enviamos um link para o seu e-mail.';
+});
+// voltou pelo link de "esqueci minha senha": pede a nova senha
+function modoNovaSenha(){
+  if(recuperando) return; recuperando=true;
+  document.querySelector('h1').textContent='Crie uma nova senha';
+  $('email').closest('label').hidden=true; $('esqueci').hidden=true;
+  $('senha').value=''; $('senha').autocomplete='new-password'; $('senha').closest('label').firstChild.textContent='Nova senha';
+  $('b').textContent='Salvar e entrar'; $('senha').focus();
+}
+sb.auth.onAuthStateChange(ev=>{ if(ev==='PASSWORD_RECOVERY') modoNovaSenha(); });
+const { data:{ session } } = await sb.auth.getSession();
+if(window.veioRecuperar){
+  if(session) modoNovaSenha();
+  else { $('msg').textContent='Este link expirou ou já foi usado. Peça um novo em “Esqueci minha senha”.'; }
+  history.replaceState(null,'',location.pathname); // tira o ?recuperar=1 da barra
+} else if(session){ // já tem sessão de administradora: entra direto
+  const { data: admin } = await sb.rpc('is_admin'); if(admin) location.replace('app.html');
+}
+</script>
+</body>
+</html>

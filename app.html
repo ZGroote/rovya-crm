@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="img/icon-512.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Rovya">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>Rovya · Gestão</title>
+<meta name="theme-color" content="#140b0d">
+<link rel="icon" href="img/favicon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,500;0,600;1,500&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="app.css?v=4">
+</head>
+<body>
+<div class="entrada" aria-hidden="true"></div>
+<aside class="lado">
+  <a class="marca" href="#/"><img src="img/selo.png" alt=""><span>ROVYA</span></a>
+  <nav id="nav">
+    <a href="#/" data-r="inicio"><i>◈</i>Início</a>
+    <a href="#/funil" data-r="funil"><i>⟡</i>Funil</a>
+    <a href="#/clientes" data-r="clientes"><i>✦</i>Clientes</a>
+    <a href="#/projetos" data-r="projetos"><i>❖</i>Projetos</a>
+    <a href="#/agenda" data-r="agenda"><i>◷</i>Agenda</a>
+    <a href="#/financeiro" data-r="financeiro"><i>◎</i>Financeiro</a>
+    <a href="#/modelos" data-r="modelos"><i>❦</i>Modelos</a>
+  </nav>
+  <button class="sair" id="sair">Sair</button>
+</aside>
+<main id="main" tabindex="-1"></main>
+<dialog id="dlg"><form method="dialog" id="dlgf"></form></dialog>
+<div id="toast" role="status"></div>
+<script type="module" src="app.js?v=4"></script>
+</body>
+</html>
