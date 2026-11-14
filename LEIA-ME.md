@@ -39,3 +39,14 @@ Qualquer hospedagem estática serve (GitHub Pages, como as figurinhas). Depois d
 ## Testar no computador
 
 `python -m http.server 8777 --directory crm` e abra http://localhost:8777/login.html.
+
+## Assistente (IA) e notificações — falta a chave do Gemini
+
+A função `crm-assistente` usa o **Gemini pago** (`gemini-3.8-flash`). O nível grátis usa os dados para treinar, e aqui há dados de clientes. Enquanto não houver chave, o chat responde "falta GEMINI_API_KEY nos secrets".
+
+1. Em https://aistudio.google.com/apikey → **Criar chave de API** → projeto **CRM SA**. A coluna "Plano" precisa dizer **Pago**. Se disser "Free", clique em **Configurar faturamento**.
+2. No Supabase (rovya-stickers) → **Edge Functions → Secrets** → crie `GEMINI_API_KEY` com a chave.
+3. (Opcional) Em console.cloud.google.com/billing/budgets, crie um orçamento de R$ 30/mês, que só avisa por e-mail.
+4. No celular, instale o app (Adicionar à tela inicial) → **Assistente** → **🔔 Receber resumo às 7h30** → **Testar notificação**.
+
+O resumo diário sai pelo pg_cron `crm-resumo-diario` (10:30 UTC = 07:30 em Brasília), que chama a função com o header `x-cron`.
