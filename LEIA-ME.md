@@ -58,3 +58,13 @@ A função `crm-assistente` usa o **Gemini pago** (`gemini-3.8-flash`). O nível
 4. No celular, instale o app (Adicionar à tela inicial) → **Assistente** → **🔔 Receber resumo às 7h30** → **Testar notificação**.
 
 O resumo diário sai pelo pg_cron `crm-resumo-diario` (10:30 UTC = 07:30 em Brasília), que chama a função com o header `x-cron`.
+
+## Segurança, registro e backup (etapa 4)
+
+- **Verificação em duas etapas (MFA):** em Configurações → Ativar, com um app autenticador. Quem ativa só lê/escreve o CRM com o código: as políticas restritivas `crm_mfa` (`supabase/009_seguranca.sql`) exigem sessão `aal2` para quem tem fator verificado, e as Edge Functions conferem o mesmo. Perdeu o celular? No Supabase → Authentication → Users → a usuária → remover o fator MFA; ela entra só com a senha e ativa de novo.
+- **Registro de alterações:** a tabela `crm_log` recebe, por trigger, todo insert/update/delete nas tabelas `crm_*` (no update, só os campos que mudaram). O navegador só lê; ninguém edita ou apaga pelo CRM. Itens apagados podem ser restaurados em Configurações → Restaurar (restaure primeiro o “pai”, ex.: o cliente antes do projeto).
+- **Backup:** Configurações → Baixar backup ou Salvar no Drive (pasta 15 Tecnologia e Sistemas). Arquivo `ROVYA_BACKUP_AAAA-MM-DD.json` com `{tabelas: {crm_clientes: [...], ...}}`. Recomendado: um backup no Drive por semana.
+- **Restaurar um backup** (num projeto vazio, depois de rodar os SQL 001…009 em ordem): para cada tabela, na ordem clientes → oportunidades → interacoes → servicos → propostas → contratos → projetos → etapas → entregas → anexos → tarefas → parcelas → modelos → documentos → drive, rode no SQL Editor:
+  `insert into public.crm_clientes select * from jsonb_populate_recordset(null::public.crm_clientes, '<cole aqui o array crm_clientes do JSON>'::jsonb) on conflict do nothing;`
+  Teste a restauração de vez em quando num projeto de teste: backup que nunca foi restaurado não é garantia.
+- **Relatórios:** indicadores comerciais, financeiros e de operação por período, com CSV.

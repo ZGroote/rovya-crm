@@ -3,6 +3,8 @@ import { servicos, propostas, proposta, novaProposta, propostasDoCliente } from 
 import { contratos, contrato, novoContrato, alertasContratos, contratosDoCliente } from './contratos.js';
 import { documentos, cartaoDrive, ligarCartaoDrive } from './drive.js';
 import { financeiro, abaFinanceiro } from './financeiro.js';
+import { configuracoes } from './configuracoes.js';
+import { relatorios } from './relatorios.js';
 import { tarefas, abaTarefas, tarefasDaSemana, linhaTarefa, ligarLinhas } from './tarefas.js';
 
 const ETAPAS_FUNIL = [['contato', 'Primeiro contato'], ['diagnostico', 'Diagnóstico'], ['proposta', 'Proposta enviada'], ['negociacao', 'Negociação'], ['ganho', 'Fechado'], ['perdido', 'Perdido']];
@@ -16,10 +18,11 @@ const TIPOS_MODELO = [['orientacao', 'Orientação de etapa'], ['email', 'E-mail
 /* ---------- autenticação ---------- */
 const { data: { session } } = await sb.auth.getSession();
 if (!session) location.replace('login.html');
+else { const { data: n } = await sb.auth.mfa.getAuthenticatorAssuranceLevel(); if (n?.nextLevel === 'aal2' && n.currentLevel !== 'aal2') location.replace('login.html'); } // falta o código do MFA
 $('#sair').onclick = async () => { await sb.auth.signOut(); location.replace('login.html'); };
 
 /* ---------- roteador ---------- */
-const rotas = { '': inicio, funil, clientes, cliente, projetos, projeto, financeiro, agenda, modelos, assistente, servicos, propostas, proposta, contratos, contrato, documentos, tarefas };
+const rotas = { '': inicio, funil, clientes, cliente, projetos, projeto, financeiro, agenda, modelos, assistente, servicos, propostas, proposta, contratos, contrato, documentos, tarefas, configuracoes, relatorios };
 async function rotear() {
   const [r, id] = location.hash.replace(/^#\/?/, '').split('/');
   const fn = rotas[r] || inicio;
@@ -123,7 +126,8 @@ async function registrarContato(clienteId, o = null, x = null) {
   toast('Registrado no histórico'); return true;
 }
 async function moverOportunidade(o, etapa, extra = {}) {
-  await q(sb.from('crm_oportunidades').update({ ...extra, etapa, atualizado_em: new Date().toISOString() }).eq('id', o.id));
+  const fim = ['ganho', 'perdido'].includes(etapa), agora = new Date().toISOString();
+  await q(sb.from('crm_oportunidades').update({ ...extra, etapa, atualizado_em: agora, fechado_em: fim ? (o.fechado_em && o.etapa === etapa ? o.fechado_em : agora) : null }).eq('id', o.id));
   if (etapa === 'ganho' && o.etapa !== 'ganho') {
     const proj = await q(sb.from('crm_projetos').select('id').eq('oportunidade_id', o.id));
     if (!proj.length) await criarProjeto(o.cliente_id, o.titulo, o.id, o.valor);

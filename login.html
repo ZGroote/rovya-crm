@@ -93,7 +93,22 @@ window.veioRecuperar = /[?&]recuperar=1/.test(location.search) || /type=recovery
 import { sb } from './config.js';
 const $=id=>document.getElementById(id), cena=document.body, espera=ms=>new Promise(r=>setTimeout(r,ms));
 const reduzido=matchMedia('(prefers-reduced-motion: reduce)').matches;
-let recuperando=false;
+let recuperando=false, pedindoCodigo=false;
+// MFA: com fator verificado, a sessão só vale (aal2) depois do código do app autenticador
+const precisaCodigo=async()=>{ const { data } = await sb.auth.mfa.getAuthenticatorAssuranceLevel(); return data?.nextLevel==='aal2' && data.currentLevel!=='aal2'; };
+function modoCodigo(){
+  pedindoCodigo=true; $('b').disabled=false; $('msg').textContent='';
+  document.querySelector('h1').textContent='Código de verificação';
+  $('email').closest('label').hidden=true; $('esqueci').hidden=true;
+  const s=$('senha'); s.value=''; s.type='text'; s.inputMode='numeric'; s.autocomplete='one-time-code'; s.maxLength=6;
+  s.closest('label').firstChild.textContent='6 dígitos do app autenticador'; $('b').textContent='Confirmar'; s.focus();
+}
+async function verificarCodigo(code){
+  const { data } = await sb.auth.mfa.listFactors();
+  const f = data?.totp?.find(x=>x.status==='verified'); if(!f) throw new Error('Nenhum autenticador encontrado.');
+  const { error } = await sb.auth.mfa.challengeAndVerify({ factorId: f.id, code });
+  if(error) throw new Error('Código incorreto ou vencido. Confira o app e tente de novo.');
+}
 
 async function entrar(email,senha){
   const { error } = await sb.auth.signInWithPassword({ email, password: senha });
@@ -116,12 +131,16 @@ $('f').addEventListener('submit',async e=>{
   const email=$('email').value.trim(), senha=$('senha').value;
   $('b').disabled=true;
   try{
-    if(recuperando){
+    if(pedindoCodigo){
+      const code=$('senha').value.replace(/\D/g,''); if(code.length!==6) throw new Error('Digite os 6 dígitos.');
+      await verificarCodigo(code);
+    } else if(recuperando){
       if(senha.length<8) throw new Error('Use pelo menos 8 caracteres.');
       const { error } = await sb.auth.updateUser({ password: senha }); if(error) throw error;
     } else {
       if(!email||!senha) throw new Error('Preencha e-mail e senha.');
       await entrar(email,senha);
+      if(await precisaCodigo()){ modoCodigo(); return; }
     }
   }catch(err){ tranca(err.message); return; }
   abrir();
@@ -147,7 +166,8 @@ if(window.veioRecuperar){
   else { $('msg').textContent='Este link expirou ou já foi usado. Peça um novo em “Esqueci minha senha”.'; }
   history.replaceState(null,'',location.pathname); // tira o ?recuperar=1 da barra
 } else if(session){ // já tem sessão de administradora: entra direto
-  const { data: admin } = await sb.rpc('is_admin'); if(admin) location.replace('app.html');
+  if(await precisaCodigo()) modoCodigo();
+  else { const { data: admin } = await sb.rpc('is_admin'); if(admin) location.replace('app.html'); }
 }
 </script>
 </body>

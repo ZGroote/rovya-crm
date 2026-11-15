@@ -98,7 +98,15 @@ export async function enviarAoDrive({ cliente, arquivo, tipo, subpasta, versao, 
   const ext = (arquivo.name.match(/\.[\w]+$/) || [''])[0].toLowerCase();
   const nome = `ROVYA_${cliente.codigo || slug(cliente.empresa || cliente.nome)}_${tipo}_${hoje()}_V${String(versao).padStart(2, '0')}${ext}`;
   toast('Enviando ' + nome + '…');
-  // upload resumível: funciona para arquivos grandes (vídeos, PDFs pesados)
+  const f = await subir(arquivo, nome, pai);
+  const [doc] = await q(sb.from('crm_documentos').insert({ drive_id: f.id, nome: f.name, link: f.webViewLink, tipo, subpasta, versao, classificacao,
+    cliente_id: cliente.id, tamanho: arquivo.size, ...vinculo }).select());
+  toast('Salvo no Drive: ' + f.name); return doc;
+}
+
+// upload resumível: funciona para arquivos grandes (vídeos, PDFs pesados). Devolve {id, name, webViewLink}.
+export async function subir(arquivo, nome, pai) {
+  toast('Enviando ' + nome + '…');
   const ini = await api('https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&fields=id,name,webViewLink', {
     method: 'POST', headers: { 'Content-Type': 'application/json; charset=UTF-8', 'X-Upload-Content-Type': arquivo.type || 'application/octet-stream' },
     body: JSON.stringify({ name: nome, parents: [pai] }) });
@@ -106,9 +114,7 @@ export async function enviarAoDrive({ cliente, arquivo, tipo, subpasta, versao, 
   if (!destino) throw new Error('O Drive não devolveu o endereço de envio.');
   const f = await (await fetch(destino, { method: 'PUT', body: arquivo })).json();
   if (!f.id) throw new Error('Drive: ' + (f.error?.message || 'falha no envio'));
-  const [doc] = await q(sb.from('crm_documentos').insert({ drive_id: f.id, nome: f.name, link: f.webViewLink, tipo, subpasta, versao, classificacao,
-    cliente_id: cliente.id, tamanho: arquivo.size, ...vinculo }).select());
-  toast('Salvo no Drive: ' + f.name); return doc;
+  return f;
 }
 
 // diálogo genérico de envio (ficha do cliente)

@@ -150,6 +150,9 @@ async function eAdmin(req: Request) {
   if (!t) return false;
   const { data: { user } } = await db.auth.getUser(t);
   if (!user?.email) return false;
+  // MFA: quem tem fator verificado precisa de sessão aal2 (o token já foi validado pelo getUser)
+  const aal = JSON.parse(atob(t.split('.')[1].replace(/-/g, '+').replace(/_/g, '/'))).aal;
+  if (user.factors?.some((f: any) => f.status === 'verified') && aal !== 'aal2') return false;
   return !!(await db.from('admins').select('email').eq('email', user.email).maybeSingle()).data;
 }
 
