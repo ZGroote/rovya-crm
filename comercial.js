@@ -1,6 +1,7 @@
 // comercial: catálogo de serviços e propostas versionadas (tabelas crm_servicos e crm_propostas)
 import { sb, $, main, esc, brl, hoje, diaLocal, dataBR, venceu, toast, q, rotulo, preencher, mdHtml, formulario, confirma, listaClientes, opcoesClientes } from './util.js';
 import { novoContrato } from './contratos.js';
+import { enviarAoDrive, criarPastaCliente, linhaDoc } from './drive.js';
 
 const STATUS_PROP = [['rascunho', 'Rascunho'], ['enviada', 'Enviada'], ['aprovada', 'Aprovada'], ['recusada', 'Recusada']];
 const COR_PROP = { rascunho: 'p-a_fazer', enviada: 'p-enviado', aprovada: 'p-aprovado', recusada: 'p-revisao' };
@@ -89,13 +90,15 @@ export async function proposta(id) {
   const [vers, servs] = await Promise.all([
     q(sb.from('crm_propostas').select('id,versao').eq('grupo', p.grupo).order('versao')),
     q(sb.from('crm_servicos').select('id,codigo,nome,descricao,preco').eq('ativo', true).order('nome'))]);
+  // PDFs no Drive de todas as versões do grupo (linhaDoc mostra a versão)
+  const docs = await q(sb.from('crm_documentos').select('*').in('proposta_id', vers.map(v => v.id)).order('criado_em', { ascending: false }));
   const c = p.crm_clientes, ult = vers.at(-1), ro = p.versao < ult.versao; // versões antigas = histórico, só leitura
   const itens = p.itens || [];
   const dis = ro ? 'disabled' : '';
   main.innerHTML = `<div class="topo"><div><div class="eyebrow"><a href="#/cliente/${c.id}">${esc(c.empresa || c.nome)}</a> · <a href="#/propostas">Propostas</a></div><h1 id="pTit">${esc(p.titulo)}</h1>
       <p>Proposta · ${vers.map(v => v.id === id ? `<b>v${v.versao}</b>` : `<a href="#/proposta/${v.id}">v${v.versao}</a>`).join(' · ')}${p.enviada_em ? ' · enviada ' + dataBR(p.enviada_em) : ''}</p></div>
     <div class="acoes"><select id="st" class="busca" style="min-width:0">${STATUS_PROP.map(([k, l]) => `<option value="${k}" ${k === p.status ? 'selected' : ''}>${l}</option>`).join('')}</select>
-      <button class="bt sec" id="pdf">Gerar PDF</button><button class="bt sec" id="nv">Nova versão</button>${ro ? '' : '<button class="bt" id="salvar">Salvar</button>'}</div></div>
+      <button class="bt sec" id="pdf">Gerar PDF</button><button class="bt sec" id="envDrive">Enviar PDF ao Drive</button><button class="bt sec" id="nv">Nova versão</button>${ro ? '' : '<button class="bt" id="salvar">Salvar</button>'}</div></div>
     ${ro ? `<p class="card mute" style="margin:0 0 16px">Esta v${p.versao} é histórico e não se edita. Abra a <a href="#/proposta/${ult.id}">v${ult.versao}</a> ou use “Nova versão” para partir desta.</p>` : ''}
     <div class="acoes" style="margin-bottom:18px">${p.status !== 'enviada' ? '<button class="bt peq sec" data-st="enviada">Marcar enviada</button>' : ''}${p.status !== 'aprovada' ? '<button class="bt peq sec" data-st="aprovada">Aprovada</button>' : ''}${p.status !== 'recusada' ? '<button class="bt peq sec" data-st="recusada">Recusada</button>' : ''}
       <button class="bt peq fantasma" id="apagar" style="color:var(--bad)">Apagar esta versão</button></div>
@@ -108,7 +111,8 @@ export async function proposta(id) {
           <label class="mute" style="display:grid;gap:4px;font-size:.78rem">Válida até<input id="fVal" type="date" style="${CAMPO_TELA}" value="${esc(p.validade)}" ${dis}></label>
           <label class="mute" style="display:grid;gap:4px;font-size:.78rem">Desconto (R$)<input id="fDesc" type="number" step="0.01" min="0" style="${CAMPO_TELA}" value="${esc(p.desconto || '')}" ${dis}></label></div>
         <label class="mute" style="display:grid;gap:4px;font-size:.78rem">Corpo (## título, **negrito**)<textarea id="fCorpo" style="${CAMPO_TELA};min-height:420px;resize:vertical" ${dis}>${esc(p.corpo)}</textarea></label></section>
-      <section class="card"><h3>Pré-visualização</h3><div class="ori"><div class="txt" id="prev" style="max-height:none"></div></div></section></div>`;
+      <section class="card"><h3>Pré-visualização</h3><div class="ori"><div class="txt" id="prev" style="max-height:none"></div></div></section></div>
+    ${docs.length ? `<section class="card" style="margin-top:18px"><h3>No Drive</h3><ul class="lista">${docs.map(linhaDoc).join('')}</ul></section>` : ''}`;
 
   const desc = () => r2($('#fDesc').value);
   const desenha = () => {
@@ -169,6 +173,15 @@ export async function proposta(id) {
     toast(`v${ult.versao + 1} criada`); location.hash = '#/proposta/' + n.id;
   };
   $('#pdf').onclick = async () => { await salvar(); imprimir(p, c); };
+  $('#envDrive').onclick = async () => {
+    try {
+      if (!c.drive_pasta && !(await confirma('Este cliente ainda não tem pasta no Drive. Criar agora?') && await criarPastaCliente(c))) return;
+      if (!await formulario('Enviar PDF ao Drive', [], {}, '<p class="mute">Use o PDF que você salvou em “Gerar PDF”.</p><label>Arquivo PDF<input type="file" id="pdfDrive" accept="application/pdf" required></label>', 'Enviar')) return;
+      const arquivo = $('#pdfDrive').files[0]; if (!arquivo) return; // o diálogo continua no DOM depois de fechar
+      await enviarAoDrive({ cliente: c, arquivo, tipo: 'PROPOSTA', subpasta: '03', versao: p.versao, vinculo: { proposta_id: p.id }, classificacao: 'cliente' });
+      proposta(id);
+    } catch (e) { toast(e.message, true); }
+  };
   $('#apagar').onclick = async () => {
     if (!await confirma(`Apagar a v${p.versao} desta proposta? As outras versões ficam.`)) return;
     await q(sb.from('crm_propostas').delete().eq('id', id));

@@ -1,5 +1,6 @@
 // Contratos: recorrentes, avulsos e mistos. Só alerta datas; nada muda de status sozinho.
 import { sb, $, main, esc, brl, hoje, diaLocal, dataBR, toast, q, rotulo, formulario, confirma, listaClientes, opcoesClientes } from './util.js';
+import { enviarAoDrive, criarPastaCliente, linhaDoc } from './drive.js';
 
 const TIPOS = [['recorrente', 'Recorrente'], ['avulso', 'Avulso'], ['misto', 'Misto']];
 const STATUS = [['vigente', 'Vigente'], ['assinatura', 'Aguardando assinatura'], ['rascunho', 'Rascunho'], ['encerrado', 'Encerrado'], ['cancelado', 'Cancelado']];
@@ -83,10 +84,11 @@ export async function contratos() {
 
 /* ---------- ficha: #/contrato/<id> ---------- */
 export async function contrato(id) {
-  const [c] = await q(sb.from('crm_contratos').select('*,crm_clientes(id,codigo,nome,empresa),crm_propostas!crm_contratos_proposta_id_fkey(id,titulo,versao),crm_projetos!crm_contratos_projeto_id_fkey(id,nome)').eq('id', id));
+  const [c] = await q(sb.from('crm_contratos').select('*,crm_clientes(id,codigo,nome,empresa,drive_pasta,drive_subpastas),crm_propostas!crm_contratos_proposta_id_fkey(id,titulo,versao),crm_projetos!crm_contratos_projeto_id_fkey(id,nome)').eq('id', id));
   if (!c) { main.innerHTML = '<p class="vazio">Contrato não encontrado.</p>'; return; }
   const cli = c.crm_clientes, prop = c.crm_propostas, proj = c.crm_projetos;
   const arqUrl = c.arquivo ? (await sb.storage.from('crm-anexos').createSignedUrl(c.arquivo, 3600)).data?.signedUrl : null;
+  const docs = await q(sb.from('crm_documentos').select('*').eq('contrato_id', id).order('criado_em', { ascending: false }));
   const al = avisos(c);
   main.innerHTML = `<div class="topo"><div><div class="eyebrow"><a href="#/contratos">Contratos</a> · <a href="#/cliente/${esc(cli.id)}">${esc(nomeCli(cli))}</a></div><h1>${esc(c.titulo)}</h1>
       <p>${pillTipo(c.tipo)} ${pillStatus(c.status)}${al.map(([t, forte]) => ` · <span class="${forte ? 'atrasado' : ''}">${esc(t)}</span>`).join('')}</p></div>
@@ -104,7 +106,9 @@ export async function contrato(id) {
     <section class="card"><h3>Assinatura</h3><ul class="lista">
       <li><div class="cresce"><b>Link para assinar</b><small>${linkOk(c.link_assinado) ? `<a href="${esc(c.link_assinado)}" target="_blank" rel="noopener">${esc(c.link_assinado)}</a>` : 'Nenhum link (D4Sign, gov.br…)'}</small></div><button class="bt peq fantasma" id="link">${c.link_assinado ? 'Trocar' : 'Adicionar'}</button></li>
       <li><div class="cresce"><b>Contrato assinado</b><small>${arqUrl ? `<a href="${esc(arqUrl)}" target="_blank" rel="noopener">${esc(nomeArq(c.arquivo))}</a>` : 'Nenhum arquivo anexado.'}</small></div>
-        <label class="bt peq sec" style="cursor:pointer">${c.arquivo ? 'Substituir' : 'Anexar'}<input type="file" id="arq" hidden></label></li></ul></section>
+        <label class="bt peq sec" style="cursor:pointer">${c.arquivo ? 'Substituir' : 'Anexar'}<input type="file" id="arq" hidden></label></li>
+      <li><div class="cresce"><b>No Drive</b><small>${docs.length ? 'Cópias na pasta do cliente:' : 'Nenhum arquivo enviado ao Drive.'}</small></div><button class="bt peq sec" id="envDrive">Enviar ao Drive</button></li>
+      ${docs.map(linhaDoc).join('')}</ul></section>
   </div>`;
   $('#st').onchange = async e => { await q(sb.from('crm_contratos').update({ status: e.target.value }).eq('id', id)); toast('Status atualizado'); contrato(id); };
   $('#ed').onclick = async () => {
@@ -136,6 +140,15 @@ export async function contrato(id) {
     await q(sb.from('crm_contratos').update({ arquivo: caminho }).eq('id', id));
     if (c.arquivo) await sb.storage.from('crm-anexos').remove([c.arquivo]); // substituiu: tira o antigo
     toast('Contrato anexado'); contrato(id);
+  };
+  $('#envDrive').onclick = async () => {
+    try {
+      if (!cli.drive_pasta && !(await confirma('Este cliente ainda não tem pasta no Drive. Criar agora?') && await criarPastaCliente(cli))) return;
+      if (!await formulario('Enviar ao Drive', [], {}, '<p class="mute">Normalmente o PDF do contrato assinado.</p><label>Arquivo<input type="file" id="contrDrive" required></label>', 'Enviar')) return;
+      const arquivo = $('#contrDrive').files[0]; if (!arquivo) return; // o diálogo continua no DOM depois de fechar
+      await enviarAoDrive({ cliente: cli, arquivo, tipo: 'CONTRATO', subpasta: '03', vinculo: { contrato_id: c.id }, classificacao: 'confidencial' });
+      contrato(id);
+    } catch (e) { toast(e.message, true); }
   };
   if (!proj) $('#nProj').onclick = () => dispatchEvent(new CustomEvent('crm:criar-projeto', { detail: { cliente_id: c.cliente_id, nome: c.titulo, valor: c.valor_avulso ?? c.valor_mensal, contrato_id: id } }));
 }

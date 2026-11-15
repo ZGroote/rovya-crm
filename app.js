@@ -1,6 +1,7 @@
 import { sb, $, main, esc, brl, diaLocal, hoje, dataBR, venceu, toast, q, rotulo, preencher, mdHtml, mdTexto, formulario, confirma, listaClientes, opcoesClientes, funcao } from './util.js';
 import { servicos, propostas, proposta, novaProposta, propostasDoCliente } from './comercial.js';
 import { contratos, contrato, novoContrato, alertasContratos, contratosDoCliente } from './contratos.js';
+import { documentos, cartaoDrive, ligarCartaoDrive } from './drive.js';
 
 const ETAPAS_FUNIL = [['contato', 'Primeiro contato'], ['diagnostico', 'Diagnóstico'], ['proposta', 'Proposta enviada'], ['negociacao', 'Negociação'], ['ganho', 'Fechado'], ['perdido', 'Perdido']];
 const STATUS_ENT = [['a_fazer', 'A fazer'], ['produzindo', 'Em produção'], ['enviado', 'Enviado'], ['revisao', 'Em revisão'], ['aprovado', 'Aprovado']];
@@ -14,7 +15,7 @@ if (!session) location.replace('login.html');
 $('#sair').onclick = async () => { await sb.auth.signOut(); location.replace('login.html'); };
 
 /* ---------- roteador ---------- */
-const rotas = { '': inicio, funil, clientes, cliente, projetos, projeto, financeiro, agenda, modelos, assistente, servicos, propostas, proposta, contratos, contrato };
+const rotas = { '': inicio, funil, clientes, cliente, projetos, projeto, financeiro, agenda, modelos, assistente, servicos, propostas, proposta, contratos, contrato, documentos };
 async function rotear() {
   const [r, id] = location.hash.replace(/^#\/?/, '').split('/');
   const fn = rotas[r] || inicio;
@@ -163,8 +164,9 @@ async function cliente(id) {
     <section class="card"><h3>Projetos</h3><ul class="lista">${c.crm_projetos.map(p => `<li><a class="cresce" href="#/projeto/${p.id}"><b>${esc(p.nome)}</b></a><span class="pill">${rotulo(STATUS_PROJ, p.status)}</span></li>`).join('') || '<li class="vazio">Nenhum projeto.</li>'}</ul>
       <button class="bt peq sec" id="nProj">+ Projeto</button></section>
     <section class="card"><h3>Oportunidades</h3><ul class="lista">${c.crm_oportunidades.map(o => `<li data-op="${o.id}" style="cursor:pointer"><div class="cresce"><b>${esc(o.titulo)}</b><small>${o.valor ? brl(o.valor) + ' · ' : ''}${esc(o.proximo_passo || '')}</small></div><span class="pill">${rotulo(ETAPAS_FUNIL, o.etapa)}</span></li>`).join('') || '<li class="vazio">Nenhuma oportunidade.</li>'}</ul></section>
-    ${await propostasDoCliente(id)}${await contratosDoCliente(id)}
+    ${await propostasDoCliente(id)}${await contratosDoCliente(id)}${await cartaoDrive(c)}
   </div>`;
+  ligarCartaoDrive(c, () => cliente(id));
   main.querySelector('[data-nova-proposta]').onclick = () => novaProposta({ cliente_id: id });
   main.querySelector('[data-novo-contrato]').onclick = () => novoContrato({ cliente_id: id });
   $('#ed').onclick = async () => {

@@ -1,5 +1,6 @@
-// Ponte CRM <-> Google Agenda da Rovya.
-// POST (com o login da admin): {acao:'url'|'listar'|'criar'|'editar'|'apagar'|'desconectar', ...}
+// Ponte CRM <-> Google (Agenda + Drive) da Rovya.
+// POST (com o login da admin): {acao:'url'|'listar'|'criar'|'editar'|'apagar'|'desconectar'|'token', ...}
+// 'token' devolve um access token de 1 h (escopos calendar.events + drive.file) para o navegador falar direto com o Drive.
 // GET: volta do consentimento do Google (?code&state), guarda o refresh token e redireciona para o CRM.
 // Deploy com verify_jwt = false (o GET vem do Google sem login); o POST confere o login aqui dentro.
 import { createClient } from 'jsr:@supabase/supabase-js@2';
@@ -67,7 +68,7 @@ Deno.serve(async req => {
     const state = `${v}.${exp}.${await assina(`${v}.${exp}`)}`;
     return json({ url: 'https://accounts.google.com/o/oauth2/v2/auth?' + new URLSearchParams({
       client_id: CID, redirect_uri: REDIRECT, response_type: 'code', access_type: 'offline', prompt: 'consent', state,
-      scope: 'https://www.googleapis.com/auth/calendar.events' }) });
+      scope: 'https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/drive.file' }) });
   }
   if (b.acao === 'desconectar') {
     const { data } = await db.from('crm_google').select('refresh_token').eq('id', 1).maybeSingle();
@@ -82,6 +83,10 @@ Deno.serve(async req => {
   const repassa = async (r: Response) => r.status === 204 ? json({ ok: true }) : r.ok ? json(await r.json()) : json({ erro: (await r.json()).error?.message || 'Erro no Google' }, 502);
 
   switch (b.acao) {
+    case 'token': { // drive.file só enxerga o que o CRM criou; o token vale 1 h
+      const info = await (await fetch('https://oauth2.googleapis.com/tokeninfo?access_token=' + t.token)).json();
+      return json({ token: t.token, email: t.email, drive: String(info.scope || '').includes('drive.file') });
+    }
     case 'listar': {
       const r = await g('?' + new URLSearchParams({ timeMin: new Date(b.de).toISOString(), timeMax: new Date(b.ate).toISOString(), singleEvents: 'true', orderBy: 'startTime', maxResults: '250' }));
       const j = await r.json();
