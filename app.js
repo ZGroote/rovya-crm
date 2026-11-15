@@ -1,65 +1,12 @@
-import { sb, SUPABASE_URL } from './config.js';
-
-/* ---------- utilidades ---------- */
-const $ = s => document.querySelector(s);
-const main = $('#main');
-const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const brl = v => (Number(v) || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
-const diaLocal = (mais = 0) => new Date(Date.now() + mais * 864e5).toLocaleDateString('sv'); // AAAA-MM-DD no fuso local
-const hoje = () => diaLocal();
-const dataBR = d => d ? new Date(d + (d.length === 10 ? 'T12:00' : '')).toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' }) : '';
-const venceu = d => d && d < hoje();
-
-function toast(msg, erro) {
-  const t = $('#toast'); t.textContent = msg; t.className = 'on' + (erro ? ' erro' : '');
-  clearTimeout(toast.t); toast.t = setTimeout(() => t.className = '', 3200);
-}
-async function q(p) { const { data, error } = await p; if (error) { toast(error.message, true); throw error; } return data; }
+import { sb, $, main, esc, brl, diaLocal, hoje, dataBR, venceu, toast, q, rotulo, preencher, mdHtml, mdTexto, formulario, confirma, listaClientes, opcoesClientes, funcao } from './util.js';
+import { servicos, propostas, proposta, novaProposta, propostasDoCliente } from './comercial.js';
+import { contratos, contrato, novoContrato, alertasContratos, contratosDoCliente } from './contratos.js';
 
 const ETAPAS_FUNIL = [['contato', 'Primeiro contato'], ['diagnostico', 'Diagnóstico'], ['proposta', 'Proposta enviada'], ['negociacao', 'Negociação'], ['ganho', 'Fechado'], ['perdido', 'Perdido']];
 const STATUS_ENT = [['a_fazer', 'A fazer'], ['produzindo', 'Em produção'], ['enviado', 'Enviado'], ['revisao', 'Em revisão'], ['aprovado', 'Aprovado']];
+const TIPOS_LEAD = [['receptivo', 'Receptivo (chegou até mim)'], ['ativo', 'Ativo (prospecção)']];
 const STATUS_PROJ = [['ativo', 'Ativo'], ['pausado', 'Pausado'], ['concluido', 'Concluído']];
-const TIPOS_MODELO = [['orientacao', 'Orientação de etapa'], ['email', 'E-mail'], ['whatsapp', 'WhatsApp'], ['contrato', 'Contrato'], ['termo', 'Termo'], ['outro', 'Outro']];
-const rotulo = (lista, v) => (lista.find(x => x[0] === v) || [, v])[1];
-
-// preenche {{empresa}}, {{contato}}, {{cliente}} com os dados do cliente
-const preencher = (txt, c) => (txt || '')
-  .replaceAll('{{empresa}}', c?.empresa || c?.nome || '{{empresa}}')
-  .replaceAll('{{contato}}', (c?.nome || '{{contato}}').split(' ')[0])
-  .replaceAll('{{cliente}}', c?.nome || '{{cliente}}');
-
-// textos vindos do Trello usam markdown simples (## título, **negrito**)
-const mdHtml = t => esc(t).replace(/^#{1,6}\s*(.+)$/gm, '<b class="tit">$1</b>').replace(/\*\*(.+?)\*\*/g, '<b>$1</b>');
-const mdTexto = t => (t || '').replace(/^#{1,6}\s*/gm, '').replace(/\*\*(.+?)\*\*/g, '*$1*'); // *negrito* do WhatsApp
-
-/* ---------- formulário genérico em <dialog> ---------- */
-// campos: [{k, l, t:'text'|'textarea'|'date'|'time'|'number'|'email'|'select', o:[[v,l]], req, full}]
-function formulario(titulo, campos, val = {}, extra = '', botao = 'Salvar') {
-  const dlg = $('#dlg'), f = $('#dlgf');
-  const campo = c => {
-    const v = val[c.k] ?? c.padrao ?? '';
-    const at = `name="${c.k}" ${c.req ? 'required' : ''}`;
-    const input = c.t === 'textarea' ? `<textarea ${at} rows="${c.linhas || 5}">${esc(v)}</textarea>`
-      : c.t === 'select' ? `<select ${at}>${c.o.map(([ov, ol]) => `<option value="${esc(ov)}" ${String(ov) === String(v) ? 'selected' : ''}>${esc(ol)}</option>`).join('')}</select>`
-      : `<input type="${c.t || 'text'}" ${at} value="${esc(v)}" ${c.t === 'number' ? 'step="0.01" min="0"' : ''}>`;
-    return `<label>${esc(c.l)}${input}</label>`;
-  };
-  const html = []; for (let i = 0; i < campos.length; i++) {
-    const c = campos[i], d = campos[i + 1];
-    if (c.meia && d?.meia) { html.push(`<div class="dupla">${campo(c)}${campo(d)}</div>`); i++; } else html.push(campo(c));
-  }
-  f.innerHTML = `<h2>${esc(titulo)}</h2>${html.join('')}${extra}
-    <div class="rodape"><button class="bt fantasma" value="cancelar" formnovalidate>Cancelar</button><button class="bt" value="ok">${botao}</button></div>`;
-  dlg.showModal(); f.querySelector('input,textarea,select')?.focus();
-  return new Promise(res => {
-    dlg.onclose = () => {
-      if (dlg.returnValue !== 'ok') return res(null);
-      const o = {}; for (const c of campos) { let v = f.elements[c.k].value.trim(); o[c.k] = v === '' ? null : (c.t === 'number' ? Number(v) : v); }
-      res(o);
-    };
-  });
-}
-const confirma = async msg => (await formulario(msg, [], {}, '', 'Confirmar')) !== null;
+const TIPOS_MODELO = [['orientacao', 'Orientação de etapa'], ['email', 'E-mail'], ['whatsapp', 'WhatsApp'], ['proposta', 'Proposta'], ['contrato', 'Contrato'], ['termo', 'Termo'], ['outro', 'Outro']];
 
 /* ---------- autenticação ---------- */
 const { data: { session } } = await sb.auth.getSession();
@@ -67,11 +14,11 @@ if (!session) location.replace('login.html');
 $('#sair').onclick = async () => { await sb.auth.signOut(); location.replace('login.html'); };
 
 /* ---------- roteador ---------- */
-const rotas = { '': inicio, funil, clientes, cliente, projetos, projeto, financeiro, agenda, modelos, assistente };
+const rotas = { '': inicio, funil, clientes, cliente, projetos, projeto, financeiro, agenda, modelos, assistente, servicos, propostas, proposta, contratos, contrato };
 async function rotear() {
   const [r, id] = location.hash.replace(/^#\/?/, '').split('/');
   const fn = rotas[r] || inicio;
-  document.querySelectorAll('#nav a').forEach(a => a.classList.toggle('on', a.dataset.r === (r || 'inicio') || (a.dataset.r + 's') === r || (r === 'cliente' && a.dataset.r === 'clientes') || (r === 'projeto' && a.dataset.r === 'projetos')));
+  document.querySelectorAll('#nav a').forEach(a => a.classList.toggle('on', a.dataset.r === (r || 'inicio') || (a.dataset.r + 's') === r || (r === 'cliente' && a.dataset.r === 'clientes') || (r === 'projeto' && a.dataset.r === 'projetos') || (r === 'proposta' && a.dataset.r === 'propostas') || (r === 'contrato' && a.dataset.r === 'contratos')));
   main.innerHTML = '<p class="vazio">Carregando…</p>';
   try { await fn(id); } catch (e) { console.error(e); main.innerHTML = `<p class="vazio">Não consegui carregar: ${esc(e.message)}</p>`; }
   main.focus({ preventScroll: true });
@@ -79,10 +26,9 @@ async function rotear() {
 addEventListener('hashchange', rotear);
 
 /* ---------- dados compartilhados ---------- */
-const listaClientes = () => q(sb.from('crm_clientes').select('id,nome,empresa').order('nome'));
-const opcoesClientes = cs => cs.map(c => [c.id, c.nome + (c.empresa ? ` · ${c.empresa}` : '')]);
 const CAMPOS_CLIENTE = [
-  { k: 'nome', l: 'Nome do contato', req: true }, { k: 'empresa', l: 'Empresa / marca' },
+  { k: 'nome', l: 'Nome do contato', req: true }, { k: 'empresa', l: 'Empresa / marca (nome fantasia)' },
+  { k: 'razao_social', l: 'Razão social', meia: true }, { k: 'documento', l: 'CNPJ / CPF (quando precisar)', meia: true },
   { k: 'email', l: 'E-mail', t: 'email', meia: true }, { k: 'telefone', l: 'WhatsApp', meia: true },
   { k: 'instagram', l: 'Instagram', meia: true }, { k: 'origem', l: 'Como chegou (indicação, Instagram…)', meia: true },
   { k: 'notas', l: 'Notas', t: 'textarea', linhas: 3 }];
@@ -95,11 +41,12 @@ async function novoCliente() {
 /* ---------- INÍCIO ---------- */
 async function inicio() {
   const em7 = diaLocal(7);
-  const [ops, ents, parc, projs] = await Promise.all([
+  const [ops, ents, parc, projs, alertas] = await Promise.all([
     q(sb.from('crm_oportunidades').select('id,titulo,proximo_passo,proximo_em,etapa,crm_clientes(nome)').not('etapa', 'in', '(ganho,perdido)').not('proximo_em', 'is', null).lte('proximo_em', em7).order('proximo_em')),
     q(sb.from('crm_entregas').select('id,titulo,prazo,status,crm_etapas!inner(projeto_id,crm_projetos!inner(nome,status))').neq('status', 'aprovado').eq('crm_etapas.crm_projetos.status', 'ativo').not('prazo', 'is', null).lte('prazo', em7).order('prazo')),
     q(sb.from('crm_parcelas').select('id,descricao,valor,vencimento,crm_projetos(nome)').is('pago_em', null).lte('vencimento', em7).order('vencimento')),
     q(sb.from('crm_projetos').select('id,nome,crm_clientes(nome),crm_etapas(crm_entregas(status))').eq('status', 'ativo').order('criado_em', { ascending: false })),
+    alertasContratos(),
   ]);
   const h = new Date().getHours(), saud = h < 12 ? 'Bom dia' : h < 18 ? 'Boa tarde' : 'Boa noite';
   const progresso = p => { const es = p.crm_etapas.flatMap(e => e.crm_entregas); return es.length ? Math.round(100 * es.filter(e => e.status === 'aprovado').length / es.length) : 0; };
@@ -110,6 +57,7 @@ async function inicio() {
     <section class="card"><h3>Próximos passos</h3><ul class="lista">${ops.map(o => `<li><div class="cresce"><b>${esc(o.proximo_passo || o.titulo)}</b><small>${esc(o.crm_clientes?.nome)} · ${esc(rotulo(ETAPAS_FUNIL, o.etapa))}</small></div><span class="${venceu(o.proximo_em) ? 'atrasado' : 'mute'}">${dataBR(o.proximo_em)}</span></li>`).join('') || '<li class="vazio">Nada para esta semana.</li>'}</ul><p><a href="#/funil" class="mute">Ver funil →</a></p></section>
     <section class="card"><h3>Entregas com prazo</h3><ul class="lista">${ents.map(e => `<li><div class="cresce"><b>${esc(e.titulo)}</b><small>${esc(e.crm_etapas.crm_projetos.nome)}</small></div><span class="pill p-${e.status}">${rotulo(STATUS_ENT, e.status)}</span><span class="${venceu(e.prazo) ? 'atrasado' : 'mute'}">${dataBR(e.prazo)}</span></li>`).join('') || '<li class="vazio">Nenhum prazo nos próximos 7 dias.</li>'}</ul></section>
     <section class="card"><h3>A receber</h3><ul class="lista">${parc.map(p => `<li><div class="cresce"><b>${brl(p.valor)}</b><small>${esc(p.crm_projetos?.nome)}${p.descricao ? ' · ' + esc(p.descricao) : ''}</small></div><span class="${venceu(p.vencimento) ? 'atrasado' : 'mute'}">${venceu(p.vencimento) ? 'atrasada · ' : ''}${dataBR(p.vencimento)}</span></li>`).join('') || '<li class="vazio">Nenhuma parcela vencendo.</li>'}</ul><p><a href="#/financeiro" class="mute">Ver financeiro →</a></p></section>
+    ${alertas.length ? `<section class="card"><h3>Contratos</h3><ul class="lista">${alertas.map(a => `<li><a class="cresce" href="${a.href}"><b>${esc(a.titulo)}</b><small>${esc(a.sub)}</small></a><span class="${a.atrasado ? 'atrasado' : 'mute'}">${dataBR(a.data)}</span></li>`).join('')}</ul><p><a href="#/contratos" class="mute">Ver contratos →</a></p></section>` : ''}
     <section class="card" id="agHoje"><h3>Agenda de hoje</h3><p class="vazio">Carregando…</p></section>
   </div>
   <h2 style="margin:28px 0 12px">Projetos ativos</h2>
@@ -131,6 +79,7 @@ async function novaOportunidade(clienteId) {
     { k: 'cliente_id', l: 'Cliente', t: 'select', o: [['', 'Selecione…'], ...opcoesClientes(cs), ['+', '+ Cadastrar novo cliente']], req: true },
     { k: 'titulo', l: 'O que ela precisa', req: true },
     { k: 'valor', l: 'Valor estimado (R$)', t: 'number', meia: true }, { k: 'etapa', l: 'Etapa', t: 'select', o: ETAPAS_FUNIL.slice(0, 4), meia: true },
+    { k: 'tipo_lead', l: 'Tipo de lead', t: 'select', o: TIPOS_LEAD },
     { k: 'proximo_passo', l: 'Próximo passo' }, { k: 'proximo_em', l: 'Quando', t: 'date' },
     { k: 'notas', l: 'Notas', t: 'textarea', linhas: 3 }], { cliente_id: clienteId || '' });
   if (!v) return null;
@@ -141,9 +90,11 @@ async function editarOportunidade(o) {
   const v = await formulario(o.titulo, [
     { k: 'titulo', l: 'O que ela precisa', req: true },
     { k: 'valor', l: 'Valor estimado (R$)', t: 'number', meia: true }, { k: 'etapa', l: 'Etapa', t: 'select', o: ETAPAS_FUNIL, meia: true },
+    { k: 'tipo_lead', l: 'Tipo de lead', t: 'select', o: TIPOS_LEAD },
     { k: 'proximo_passo', l: 'Próximo passo' }, { k: 'proximo_em', l: 'Quando', t: 'date' },
     { k: 'motivo_perda', l: 'Se perdido: motivo' }, { k: 'notas', l: 'Notas', t: 'textarea', linhas: 4 }], o,
-    `<p><a href="#/cliente/${o.cliente_id}" onclick="document.getElementById('dlg').close()">Abrir ficha do cliente →</a></p>`);
+    `<div class="acoes"><a class="bt peq fantasma" href="#/cliente/${o.cliente_id}" onclick="document.getElementById('dlg').close()">Abrir ficha do cliente →</a><button class="bt peq sec" value="proposta" formnovalidate>Criar proposta</button></div>`);
+  if ($('#dlg').returnValue === 'proposta') return novaProposta({ cliente_id: o.cliente_id, oportunidade_id: o.id, titulo: o.titulo });
   if (!v) return;
   await moverOportunidade(o, v.etapa, v);
 }
@@ -161,7 +112,7 @@ async function funil() {
     <div class="funil">${ETAPAS_FUNIL.map(([k, l]) => {
       const lst = ops.filter(o => o.etapa === k), tot = lst.reduce((s, o) => s + (Number(o.valor) || 0), 0);
       return `<section class="col" data-etapa="${k}"><header><b>${l}</b><span>${lst.length}${tot ? ' · ' + brl(tot) : ''}</span></header>
-      ${lst.map(o => `<article class="op" draggable="true" data-id="${o.id}"><b>${esc(o.crm_clientes?.empresa || o.crm_clientes?.nome)}</b><small>${esc(o.titulo)}</small>
+      ${lst.map(o => `<article class="op" draggable="true" data-id="${o.id}"><b>${esc(o.crm_clientes?.empresa || o.crm_clientes?.nome)}</b>${o.tipo_lead === 'ativo' ? ' <span class="pill" title="Prospecção ativa">ativo</span>' : ''}<small>${esc(o.titulo)}</small>
         ${o.valor ? `<span class="valor">${brl(o.valor)}</span>` : ''}${o.proximo_passo && !['ganho', 'perdido'].includes(k) ? `<small class="${venceu(o.proximo_em) ? 'atrasado' : ''}">→ ${esc(o.proximo_passo)} ${dataBR(o.proximo_em)}</small>` : ''}</article>`).join('')}</section>`;
     }).join('')}</div>`;
   $('#nOp').onclick = async () => { if (await novaOportunidade()) funil(); };
@@ -190,8 +141,8 @@ async function clientes() {
   const sit = c => c.crm_projetos.some(p => p.status === 'ativo') ? '<span class="pill p-aprovado">Projeto ativo</span>'
     : c.crm_oportunidades.some(o => !['ganho', 'perdido'].includes(o.etapa)) ? '<span class="pill p-produzindo">Em negociação</span>'
     : c.crm_projetos.length ? '<span class="pill">Ex-cliente</span>' : '<span class="pill">Contato</span>';
-  const desenha = f => $('#tb').innerHTML = cs.filter(c => !f || [c.nome, c.empresa, c.email, c.instagram].join(' ').toLowerCase().includes(f))
-    .map(c => `<tr style="cursor:pointer" data-id="${c.id}"><td><b>${esc(c.nome)}</b><br><small class="mute">${esc(c.empresa)}</small></td><td class="esconde-cel"><small>${esc(c.email)}<br>${esc(c.telefone)}</small></td><td>${sit(c)}</td></tr>`).join('')
+  const desenha = f => $('#tb').innerHTML = cs.filter(c => !f || [c.codigo, c.nome, c.empresa, c.email, c.instagram].join(' ').toLowerCase().includes(f))
+    .map(c => `<tr style="cursor:pointer" data-id="${c.id}"><td>${c.codigo ? `<small class="mute">${esc(c.codigo)}</small> ` : ''}<b>${esc(c.nome)}</b><br><small class="mute">${esc(c.empresa)}</small></td><td class="esconde-cel"><small>${esc(c.email)}<br>${esc(c.telefone)}</small></td><td>${sit(c)}</td></tr>`).join('')
     || '<tr><td colspan="3" class="vazio">Nenhum cliente ainda.</td></tr>';
   desenha();
   $('#busca').oninput = e => desenha(e.target.value.toLowerCase().trim());
@@ -202,17 +153,20 @@ async function cliente(id) {
   const [c] = await q(sb.from('crm_clientes').select('*,crm_oportunidades(*),crm_projetos(id,nome,status,valor)').eq('id', id));
   if (!c) { main.innerHTML = '<p class="vazio">Cliente não encontrado.</p>'; return; }
   const zap = c.telefone ? 'https://wa.me/' + c.telefone.replace(/\D/g, '').replace(/^(?!55)/, '55') : null;
-  main.innerHTML = `<div class="topo"><div><div class="eyebrow"><a href="#/clientes">Clientes</a></div><h1>${esc(c.nome)}</h1><p>${esc(c.empresa)}</p></div>
+  main.innerHTML = `<div class="topo"><div><div class="eyebrow"><a href="#/clientes">Clientes</a>${c.codigo ? ' · ' + esc(c.codigo) : ''}</div><h1>${esc(c.nome)}</h1><p>${esc(c.empresa)}</p></div>
     <div class="acoes">${zap ? `<a class="bt sec" href="${zap}" target="_blank" rel="noopener">WhatsApp</a>` : ''}${c.email ? `<a class="bt sec" href="mailto:${esc(c.email)}">E-mail</a>` : ''}
     <button class="bt sec" id="agendar">Agendar reunião</button><button class="bt sec" id="ed">Editar</button><button class="bt" id="nOp">+ Oportunidade</button></div></div>
   <div class="grade2">
     <section class="card"><h3>Dados</h3><ul class="lista">
-      ${[['E-mail', c.email], ['WhatsApp', c.telefone], ['Instagram', c.instagram], ['Origem', c.origem], ['Cliente desde', dataBR(c.criado_em.slice(0, 10))]].filter(x => x[1]).map(([l, v]) => `<li><span class="mute" style="min-width:110px">${l}</span><span>${esc(v)}</span></li>`).join('')}</ul>
+      ${[['Código', c.codigo], ['Razão social', c.razao_social], ['CNPJ/CPF', c.documento], ['E-mail', c.email], ['WhatsApp', c.telefone], ['Instagram', c.instagram], ['Origem', c.origem], ['Cliente desde', dataBR(c.criado_em.slice(0, 10))]].filter(x => x[1]).map(([l, v]) => `<li><span class="mute" style="min-width:110px">${l}</span><span>${esc(v)}</span></li>`).join('')}</ul>
       ${c.notas ? `<p style="white-space:pre-wrap">${esc(c.notas)}</p>` : ''}</section>
     <section class="card"><h3>Projetos</h3><ul class="lista">${c.crm_projetos.map(p => `<li><a class="cresce" href="#/projeto/${p.id}"><b>${esc(p.nome)}</b></a><span class="pill">${rotulo(STATUS_PROJ, p.status)}</span></li>`).join('') || '<li class="vazio">Nenhum projeto.</li>'}</ul>
       <button class="bt peq sec" id="nProj">+ Projeto</button></section>
     <section class="card"><h3>Oportunidades</h3><ul class="lista">${c.crm_oportunidades.map(o => `<li data-op="${o.id}" style="cursor:pointer"><div class="cresce"><b>${esc(o.titulo)}</b><small>${o.valor ? brl(o.valor) + ' · ' : ''}${esc(o.proximo_passo || '')}</small></div><span class="pill">${rotulo(ETAPAS_FUNIL, o.etapa)}</span></li>`).join('') || '<li class="vazio">Nenhuma oportunidade.</li>'}</ul></section>
+    ${await propostasDoCliente(id)}${await contratosDoCliente(id)}
   </div>`;
+  main.querySelector('[data-nova-proposta]').onclick = () => novaProposta({ cliente_id: id });
+  main.querySelector('[data-novo-contrato]').onclick = () => novoContrato({ cliente_id: id });
   $('#ed').onclick = async () => {
     const v = await formulario('Editar cliente', CAMPOS_CLIENTE, c, '<button class="bt fantasma" value="apagar" formnovalidate style="justify-self:start;color:var(--bad)">Apagar cliente</button>');
     if ($('#dlg').returnValue === 'apagar') { if (await confirma(`Apagar ${c.nome} e tudo ligado a ele?`)) { await q(sb.from('crm_clientes').delete().eq('id', id)); location.hash = '#/clientes'; } return; }
@@ -225,6 +179,11 @@ async function cliente(id) {
 }
 
 /* ---------- PROJETOS ---------- */
+// a ficha do contrato pede o projeto por evento (contratos.js não importa app.js)
+addEventListener('crm:criar-projeto', async ({ detail: d }) => {
+  const pid = await criarProjeto(d.cliente_id, d.nome, null, d.valor);
+  if (pid && d.contrato_id) await q(sb.from('crm_contratos').update({ projeto_id: pid }).eq('id', d.contrato_id));
+});
 async function criarProjeto(clienteId, nome, oportunidadeId = null, valor = null) {
   const mods = await q(sb.from('crm_modelos').select('id,titulo').eq('tipo', 'projeto').order('criado_em'));
   const v = await formulario('Novo projeto', [
@@ -235,7 +194,7 @@ async function criarProjeto(clienteId, nome, oportunidadeId = null, valor = null
   if (!v) return;
   const pid = await q(sb.rpc('crm_projeto_de_modelo', { p_cliente: clienteId, p_nome: v.nome, p_modelo: v.modelo, p_oportunidade: oportunidadeId }));
   await q(sb.from('crm_projetos').update({ valor: v.valor, entrega_prevista: v.entrega_prevista }).eq('id', pid));
-  toast('Projeto criado'); location.hash = '#/projeto/' + pid;
+  toast('Projeto criado'); location.hash = '#/projeto/' + pid; return pid;
 }
 async function projetos() {
   const ps = await q(sb.from('crm_projetos').select('*,crm_clientes(nome,empresa),crm_etapas(crm_entregas(status))').order('criado_em', { ascending: false }));
@@ -437,11 +396,6 @@ async function modelos() {
 document.addEventListener('click', e => { if (e.target.id === 'copiar') { navigator.clipboard.writeText($('#dlgf').elements.t.value); toast('Copiado'); } });
 
 /* ---------- AGENDA (Google, pela Edge Function crm-google) ---------- */
-async function funcao(nome, acao, dados = {}) {
-  const { data: { session } } = await sb.auth.getSession();
-  const r = await fetch(`${SUPABASE_URL}/functions/v1/${nome}`, { method: 'POST', headers: { Authorization: 'Bearer ' + session.access_token, 'Content-Type': 'application/json' }, body: JSON.stringify({ acao, ...dados }) });
-  const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.erro || 'Falha (' + r.status + ')'); return j;
-}
 const google = (acao, dados) => funcao('crm-google', acao, dados);
 const horaEv = e => e.start?.dateTime ? new Date(e.start.dateTime).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : 'dia todo';
 async function novoEvento(val = {}, ev = null) {

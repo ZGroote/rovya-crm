@@ -8,6 +8,10 @@ Site estático (HTML + JS, sem build) com dados no Supabase, projeto **rovya-sti
 
 - `login.html`: login da rosa. Só entra quem está na tabela `admins` (hoje: rovyacreative@gmail.com, a mesma senha da Área da Rovya das figurinhas).
 - `app.html` / `app.js` / `app.css`: o CRM. Início, Funil, Clientes, Projetos (etapas e entregas), Agenda, Financeiro e Modelos.
+- `util.js`: funções comuns (formulário, toast, consultas) usadas por todos os módulos.
+- `comercial.js` + `comercial.css`: Serviços (catálogo), Propostas com versões e PDF (Salvar como PDF do navegador, nome `ROVYA_[CLIENTE]_PROPOSTA_[data]_V01`).
+- `contratos.js`: contratos recorrente/avulso/misto, assinatura externa + anexo, alertas de vencimento no Início. Nada muda de status sozinho.
+- `supabase/006_comercial.sql`: serviços, propostas, contratos e o código de cliente R001 (dado por trigger no primeiro contrato ou projeto). Já foi aplicado.
 - `config.js`: endereço e chave publicável do Supabase. Quem protege os dados é o RLS.
 - `supabase/001_crm.sql`: tabelas, RLS, bucket privado `crm-anexos` e a função `crm_projeto_de_modelo`. Já foi aplicado.
 - `supabase/002_seed.sql`: modelo de projeto “Gestão estratégica da comunicação”, com as 6 etapas do Trello da Conecta, as orientações e 29 entregas. Já foi aplicado.

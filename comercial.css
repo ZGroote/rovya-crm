@@ -1,0 +1,31 @@
+/* PDF da proposta: só aparece na impressão (comercial.js → imprimir) */
+#impressao{display:none}
+@media print{
+  @page{size:A4;margin:18mm}
+  html,body{background:#fff!important}
+  body{display:block!important}
+  body>*:not(#impressao){display:none!important}
+  #impressao{display:block;color:#2a2421;font:400 10.5pt/1.55 Inter,system-ui,sans-serif;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  #impressao header{display:flex;align-items:center;gap:12px;padding-bottom:14px;border-bottom:1px solid #b08a4a}
+  #impressao header img{width:36px;height:36px}
+  #impressao header span{font:500 9pt Inter,sans-serif;letter-spacing:.55em;color:#8e0f1d}
+  #impressao .cab{display:flex;justify-content:space-between;align-items:flex-end;gap:24px;margin:30px 0 22px}
+  #impressao .rot{font:500 7.5pt Inter,sans-serif;letter-spacing:.26em;text-transform:uppercase;color:#b08a4a;margin-bottom:6px}
+  #impressao h1{font:600 26pt/1.1 'Cormorant Garamond',serif;color:#8e0f1d;margin:0}
+  #impressao .meta{font-size:9pt;color:#7d7067;text-align:right;white-space:nowrap}
+  #impressao .cli{border-left:2px solid #b08a4a;padding:2px 0 2px 12px;margin-bottom:26px}
+  #impressao .cli b{display:block;font:600 15pt/1.2 'Cormorant Garamond',serif}
+  #impressao .cli small{display:block;color:#7d7067;font-size:8.5pt}
+  #impressao .corpo{white-space:pre-wrap;margin-bottom:26px}
+  #impressao .corpo b.tit{display:block;font:600 15pt/1.2 'Cormorant Garamond',serif;color:#8e0f1d;margin:8px 0 0}
+  #impressao table{width:100%;border-collapse:collapse;margin-bottom:12px}
+  #impressao tr{break-inside:avoid}
+  #impressao th{font:500 7.5pt Inter,sans-serif;letter-spacing:.14em;text-transform:uppercase;color:#7d7067;text-align:left;padding:6px;border-bottom:1px solid #b08a4a}
+  #impressao td{padding:8px 6px;border-bottom:1px solid #e4dbcf;vertical-align:top}
+  #impressao td small{color:#7d7067;white-space:pre-wrap}
+  #impressao tfoot td{border:0;padding:4px 6px}
+  #impressao .dir{text-align:right;white-space:nowrap}
+  #impressao .total td{font:600 16pt 'Cormorant Garamond',serif;color:#8e0f1d;padding-top:10px;border-top:1px solid #b08a4a}
+  #impressao .val{font-size:9pt;color:#7d7067;margin:6px 0 0}
+  #impressao footer{margin-top:40px;padding-top:10px;border-top:1px solid #e4dbcf;font-size:7.5pt;letter-spacing:.2em;text-transform:uppercase;color:#b08a4a;text-align:center}
+}
