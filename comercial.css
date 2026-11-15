@@ -7,8 +7,10 @@
   body>*:not(#impressao){display:none!important}
   #impressao{display:block;color:#2a2421;font:400 10.5pt/1.55 Inter,system-ui,sans-serif;-webkit-print-color-adjust:exact;print-color-adjust:exact}
   #impressao header{display:flex;align-items:center;gap:12px;padding-bottom:14px;border-bottom:1px solid #b08a4a}
-  #impressao header img{width:36px;height:36px}
-  #impressao header span{font:500 9pt Inter,sans-serif;letter-spacing:.55em;color:#8e0f1d}
+  #impressao header img{height:46px;width:auto}
+  #impressao header span{display:grid;gap:3px}
+  #impressao header b{font:600 17pt/1 'Cormorant Garamond',serif;letter-spacing:.14em;color:#1f1a18}
+  #impressao header small{font:500 6.5pt/1 Inter,sans-serif;letter-spacing:.42em;color:#b08a4a}
   #impressao .cab{display:flex;justify-content:space-between;align-items:flex-end;gap:24px;margin:30px 0 22px}
   #impressao .rot{font:500 7.5pt Inter,sans-serif;letter-spacing:.26em;text-transform:uppercase;color:#b08a4a;margin-bottom:6px}
   #impressao h1{font:600 26pt/1.1 'Cormorant Garamond',serif;color:#8e0f1d;margin:0}

@@ -186,7 +186,7 @@ async function imprimir(p, c) {
   document.getElementById('impressao')?.remove();
   const its = p.itens || [], desconto = r2(p.desconto);
   const d = document.createElement('div'); d.id = 'impressao';
-  d.innerHTML = `<header><img src="img/selo.png" alt=""><span>ROVYA</span></header>
+  d.innerHTML = `<header><img src="img/rosa.svg" alt=""><span><b>ROVYA</b><small>CREATIVE</small></span></header>
     <div class="cab"><div><div class="rot">Proposta comercial</div><h1>${esc(p.titulo)}</h1></div><div class="meta">Proposta · v${p.versao}<br>${dataLonga(hoje())}</div></div>
     <section class="cli"><small>Para</small><b>${esc(c.empresa || c.nome)}</b>
       ${c.empresa && c.nome ? `<small>A/C ${esc(c.nome)}</small>` : ''}${c.razao_social || c.documento ? `<small>${esc([c.razao_social, c.documento].filter(Boolean).join(' · '))}</small>` : ''}${c.codigo ? `<small>Cliente ${esc(c.codigo)}</small>` : ''}</section>

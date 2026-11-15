@@ -16,8 +16,10 @@ h3{font-size:1.15rem}
 /* lateral */
 .lado{position:sticky;top:0;height:100vh;background:var(--side);color:#e9dccd;display:flex;flex-direction:column;padding:22px 14px}
 .marca{display:flex;align-items:center;gap:10px;text-decoration:none;margin:0 6px 26px}
-.marca img{width:40px;height:40px}
-.marca span{font:500 .8rem Inter;letter-spacing:.4em;color:#d9b77a}
+.marca img{height:52px;width:auto}
+.marca span{display:grid;gap:3px}
+.marca b{font:600 1.35rem/1 'Cormorant Garamond',serif;letter-spacing:.14em;color:#f3ebe1}
+.marca small{font:500 .58rem/1 Inter;letter-spacing:.42em;color:#c9a063}
 nav{display:grid;gap:2px}
 nav a{display:flex;align-items:center;gap:12px;padding:10px 12px;border-radius:8px;text-decoration:none;color:#cbbcae;transition:background .2s,color .2s}
 nav a i{font-style:normal;width:18px;text-align:center;color:#8f7b6c}
