@@ -2,10 +2,14 @@ import { sb, $, main, esc, brl, diaLocal, hoje, dataBR, venceu, toast, q, rotulo
 import { servicos, propostas, proposta, novaProposta, propostasDoCliente } from './comercial.js';
 import { contratos, contrato, novoContrato, alertasContratos, contratosDoCliente } from './contratos.js';
 import { documentos, cartaoDrive, ligarCartaoDrive } from './drive.js';
+import { financeiro, abaFinanceiro } from './financeiro.js';
+import { tarefas, abaTarefas, tarefasDaSemana, linhaTarefa, ligarLinhas } from './tarefas.js';
 
 const ETAPAS_FUNIL = [['contato', 'Primeiro contato'], ['diagnostico', 'Diagnóstico'], ['proposta', 'Proposta enviada'], ['negociacao', 'Negociação'], ['ganho', 'Fechado'], ['perdido', 'Perdido']];
 const STATUS_ENT = [['a_fazer', 'A fazer'], ['produzindo', 'Em produção'], ['enviado', 'Enviado'], ['revisao', 'Em revisão'], ['aprovado', 'Aprovado']];
 const TIPOS_LEAD = [['receptivo', 'Receptivo (chegou até mim)'], ['ativo', 'Ativo (prospecção)']];
+const TIPOS_CONTATO = [['reuniao', 'Reunião'], ['ligacao', 'Ligação'], ['mensagem', 'Mensagem'], ['email', 'E-mail'], ['visita', 'Visita'], ['nota', 'Anotação']];
+const ONBOARDING_PADRAO = ['Contrato assinado', 'Pasta no Drive criada', 'Briefing recebido', 'Acessos recebidos (redes, site, contas)', 'Reunião de início (kickoff)', 'Cronograma enviado ao cliente', 'Primeira cobrança emitida'];
 const STATUS_PROJ = [['ativo', 'Ativo'], ['pausado', 'Pausado'], ['concluido', 'Concluído']];
 const TIPOS_MODELO = [['orientacao', 'Orientação de etapa'], ['email', 'E-mail'], ['whatsapp', 'WhatsApp'], ['proposta', 'Proposta'], ['contrato', 'Contrato'], ['termo', 'Termo'], ['outro', 'Outro']];
 
@@ -15,7 +19,7 @@ if (!session) location.replace('login.html');
 $('#sair').onclick = async () => { await sb.auth.signOut(); location.replace('login.html'); };
 
 /* ---------- roteador ---------- */
-const rotas = { '': inicio, funil, clientes, cliente, projetos, projeto, financeiro, agenda, modelos, assistente, servicos, propostas, proposta, contratos, contrato, documentos };
+const rotas = { '': inicio, funil, clientes, cliente, projetos, projeto, financeiro, agenda, modelos, assistente, servicos, propostas, proposta, contratos, contrato, documentos, tarefas };
 async function rotear() {
   const [r, id] = location.hash.replace(/^#\/?/, '').split('/');
   const fn = rotas[r] || inicio;
@@ -42,12 +46,13 @@ async function novoCliente() {
 /* ---------- INÍCIO ---------- */
 async function inicio() {
   const em7 = diaLocal(7);
-  const [ops, ents, parc, projs, alertas] = await Promise.all([
+  const [ops, ents, parc, projs, alertas, tars] = await Promise.all([
     q(sb.from('crm_oportunidades').select('id,titulo,proximo_passo,proximo_em,etapa,crm_clientes(nome)').not('etapa', 'in', '(ganho,perdido)').not('proximo_em', 'is', null).lte('proximo_em', em7).order('proximo_em')),
     q(sb.from('crm_entregas').select('id,titulo,prazo,status,crm_etapas!inner(projeto_id,crm_projetos!inner(nome,status))').neq('status', 'aprovado').eq('crm_etapas.crm_projetos.status', 'ativo').not('prazo', 'is', null).lte('prazo', em7).order('prazo')),
-    q(sb.from('crm_parcelas').select('id,descricao,valor,vencimento,crm_projetos(nome)').is('pago_em', null).lte('vencimento', em7).order('vencimento')),
+    q(sb.from('crm_parcelas').select('id,descricao,valor,vencimento,crm_projetos(nome)').eq('tipo', 'receita').is('pago_em', null).lte('vencimento', em7).order('vencimento')),
     q(sb.from('crm_projetos').select('id,nome,crm_clientes(nome),crm_etapas(crm_entregas(status))').eq('status', 'ativo').order('criado_em', { ascending: false })),
     alertasContratos(),
+    tarefasDaSemana(),
   ]);
   const h = new Date().getHours(), saud = h < 12 ? 'Bom dia' : h < 18 ? 'Boa tarde' : 'Boa noite';
   const progresso = p => { const es = p.crm_etapas.flatMap(e => e.crm_entregas); return es.length ? Math.round(100 * es.filter(e => e.status === 'aprovado').length / es.length) : 0; };
@@ -59,12 +64,14 @@ async function inicio() {
     <section class="card"><h3>Entregas com prazo</h3><ul class="lista">${ents.map(e => `<li><div class="cresce"><b>${esc(e.titulo)}</b><small>${esc(e.crm_etapas.crm_projetos.nome)}</small></div><span class="pill p-${e.status}">${rotulo(STATUS_ENT, e.status)}</span><span class="${venceu(e.prazo) ? 'atrasado' : 'mute'}">${dataBR(e.prazo)}</span></li>`).join('') || '<li class="vazio">Nenhum prazo nos próximos 7 dias.</li>'}</ul></section>
     <section class="card"><h3>A receber</h3><ul class="lista">${parc.map(p => `<li><div class="cresce"><b>${brl(p.valor)}</b><small>${esc(p.crm_projetos?.nome)}${p.descricao ? ' · ' + esc(p.descricao) : ''}</small></div><span class="${venceu(p.vencimento) ? 'atrasado' : 'mute'}">${venceu(p.vencimento) ? 'atrasada · ' : ''}${dataBR(p.vencimento)}</span></li>`).join('') || '<li class="vazio">Nenhuma parcela vencendo.</li>'}</ul><p><a href="#/financeiro" class="mute">Ver financeiro →</a></p></section>
     ${alertas.length ? `<section class="card"><h3>Contratos</h3><ul class="lista">${alertas.map(a => `<li><a class="cresce" href="${a.href}"><b>${esc(a.titulo)}</b><small>${esc(a.sub)}</small></a><span class="${a.atrasado ? 'atrasado' : 'mute'}">${dataBR(a.data)}</span></li>`).join('')}</ul><p><a href="#/contratos" class="mute">Ver contratos →</a></p></section>` : ''}
+    <section class="card" id="cTarefas"><h3>Tarefas</h3><ul class="lista">${tars.map(linhaTarefa).join('') || '<li class="vazio">Nenhuma tarefa para esta semana.</li>'}</ul><p><a href="#/tarefas" class="mute">Ver tarefas →</a></p></section>
     <section class="card" id="agHoje"><h3>Agenda de hoje</h3><p class="vazio">Carregando…</p></section>
   </div>
   <h2 style="margin:28px 0 12px">Projetos ativos</h2>
   <div class="grade">${projs.map(p => `<a class="card linkcard" href="#/projeto/${p.id}"><b>${esc(p.nome)}</b><p class="mute" style="margin:2px 0 12px">${esc(p.crm_clientes?.nome)}</p><div class="barra"><i style="width:${progresso(p)}%"></i></div><small class="mute">${progresso(p)}% aprovado</small></a>`).join('') || '<p class="vazio">Nenhum projeto ativo.</p>'}</div>`;
   $('#nCli').onclick = async () => { const c = await novoCliente(); if (c) location.hash = '#/cliente/' + c.id; };
   $('#nOp').onclick = async () => { if (await novaOportunidade()) location.hash = '#/funil'; };
+  ligarLinhas($('#cTarefas'), tars, inicio);
   // agenda de hoje (não bloqueia a tela)
   google('listar', { de: new Date(hoje() + 'T00:00').toISOString(), ate: new Date(hoje() + 'T23:59:59').toISOString() }).then(r => {
     const el = $('#agHoje'); if (!el) return;
@@ -94,10 +101,26 @@ async function editarOportunidade(o) {
     { k: 'tipo_lead', l: 'Tipo de lead', t: 'select', o: TIPOS_LEAD },
     { k: 'proximo_passo', l: 'Próximo passo' }, { k: 'proximo_em', l: 'Quando', t: 'date' },
     { k: 'motivo_perda', l: 'Se perdido: motivo' }, { k: 'notas', l: 'Notas', t: 'textarea', linhas: 4 }], o,
-    `<div class="acoes"><a class="bt peq fantasma" href="#/cliente/${o.cliente_id}" onclick="document.getElementById('dlg').close()">Abrir ficha do cliente →</a><button class="bt peq sec" value="proposta" formnovalidate>Criar proposta</button></div>`);
+    `<div class="acoes"><a class="bt peq fantasma" href="#/cliente/${o.cliente_id}" onclick="document.getElementById('dlg').close()">Abrir ficha do cliente →</a><button class="bt peq sec" value="contato" formnovalidate>Registrar contato</button><button class="bt peq sec" value="proposta" formnovalidate>Criar proposta</button></div>`);
+  if ($('#dlg').returnValue === 'contato') return registrarContato(o.cliente_id, o);
   if ($('#dlg').returnValue === 'proposta') return novaProposta({ cliente_id: o.cliente_id, oportunidade_id: o.id, titulo: o.titulo });
   if (!v) return;
   await moverOportunidade(o, v.etapa, v);
+}
+// histórico do lead/cliente; com oportunidade, já atualiza o próximo passo (fluxo: reunião → próxima ação)
+async function registrarContato(clienteId, o = null, x = null) {
+  const campos = [{ k: 'tipo', l: 'Tipo', t: 'select', o: TIPOS_CONTATO, meia: true }, { k: 'data', l: 'Data', t: 'date', req: true, meia: true },
+    { k: 'resumo', l: 'O que foi conversado', t: 'textarea', linhas: 5, req: true }];
+  if (o) campos.push({ k: 'proximo_passo', l: 'Próximo passo (atualiza o funil)' }, { k: 'proximo_em', l: 'Quando', t: 'date' });
+  const v = await formulario(x ? 'Editar registro' : 'Registrar contato', campos, x || { tipo: 'reuniao', data: hoje(), proximo_passo: o?.proximo_passo, proximo_em: o?.proximo_em },
+    x ? '<button class="bt fantasma" value="apagar" formnovalidate style="justify-self:start;color:var(--bad)">Apagar registro</button>' : '');
+  if (x && $('#dlg').returnValue === 'apagar') { if (await confirma('Apagar este registro do histórico?')) await q(sb.from('crm_interacoes').delete().eq('id', x.id)); return true; }
+  if (!v) return false;
+  const { proximo_passo, proximo_em, ...reg } = v;
+  if (x) await q(sb.from('crm_interacoes').update(reg).eq('id', x.id));
+  else await q(sb.from('crm_interacoes').insert({ ...reg, cliente_id: clienteId, oportunidade_id: o?.id ?? null }));
+  if (o) await q(sb.from('crm_oportunidades').update({ proximo_passo, proximo_em, atualizado_em: new Date().toISOString() }).eq('id', o.id));
+  toast('Registrado no histórico'); return true;
 }
 async function moverOportunidade(o, etapa, extra = {}) {
   await q(sb.from('crm_oportunidades').update({ ...extra, etapa, atualizado_em: new Date().toISOString() }).eq('id', o.id));
@@ -151,7 +174,8 @@ async function clientes() {
   $('#nCli').onclick = async () => { const c = await novoCliente(); if (c) location.hash = '#/cliente/' + c.id; };
 }
 async function cliente(id) {
-  const [c] = await q(sb.from('crm_clientes').select('*,crm_oportunidades(*),crm_projetos(id,nome,status,valor)').eq('id', id));
+  const [c] = await q(sb.from('crm_clientes').select('*,crm_oportunidades(*),crm_projetos(id,nome,status,valor),crm_interacoes(*)').eq('id', id));
+  c.crm_interacoes.sort((a, b) => b.data.localeCompare(a.data) || b.criado_em.localeCompare(a.criado_em));
   if (!c) { main.innerHTML = '<p class="vazio">Cliente não encontrado.</p>'; return; }
   const zap = c.telefone ? 'https://wa.me/' + c.telefone.replace(/\D/g, '').replace(/^(?!55)/, '55') : null;
   main.innerHTML = `<div class="topo"><div><div class="eyebrow"><a href="#/clientes">Clientes</a>${c.codigo ? ' · ' + esc(c.codigo) : ''}</div><h1>${esc(c.nome)}</h1><p>${esc(c.empresa)}</p></div>
@@ -159,14 +183,26 @@ async function cliente(id) {
     <button class="bt sec" id="agendar">Agendar reunião</button><button class="bt sec" id="ed">Editar</button><button class="bt" id="nOp">+ Oportunidade</button></div></div>
   <div class="grade2">
     <section class="card"><h3>Dados</h3><ul class="lista">
-      ${[['Código', c.codigo], ['Razão social', c.razao_social], ['CNPJ/CPF', c.documento], ['E-mail', c.email], ['WhatsApp', c.telefone], ['Instagram', c.instagram], ['Origem', c.origem], ['Cliente desde', dataBR(c.criado_em.slice(0, 10))]].filter(x => x[1]).map(([l, v]) => `<li><span class="mute" style="min-width:110px">${l}</span><span>${esc(v)}</span></li>`).join('')}</ul>
+      ${[['Código', c.codigo], ['Razão social', c.razao_social], ['CNPJ/CPF', c.documento], ['E-mail', c.email], ['WhatsApp', c.telefone], ['Instagram', c.instagram], ['Origem', c.origem], ['Cliente desde', c.cliente_desde ? new Date(c.cliente_desde + 'T12:00').toLocaleDateString('pt-BR') : null], ['Primeiro contato', dataBR(c.criado_em.slice(0, 10))]].filter(x => x[1]).map(([l, v]) => `<li><span class="mute" style="min-width:110px">${l}</span><span>${esc(v)}</span></li>`).join('')}</ul>
       ${c.notas ? `<p style="white-space:pre-wrap">${esc(c.notas)}</p>` : ''}</section>
     <section class="card"><h3>Projetos</h3><ul class="lista">${c.crm_projetos.map(p => `<li><a class="cresce" href="#/projeto/${p.id}"><b>${esc(p.nome)}</b></a><span class="pill">${rotulo(STATUS_PROJ, p.status)}</span></li>`).join('') || '<li class="vazio">Nenhum projeto.</li>'}</ul>
       <button class="bt peq sec" id="nProj">+ Projeto</button></section>
     <section class="card"><h3>Oportunidades</h3><ul class="lista">${c.crm_oportunidades.map(o => `<li data-op="${o.id}" style="cursor:pointer"><div class="cresce"><b>${esc(o.titulo)}</b><small>${o.valor ? brl(o.valor) + ' · ' : ''}${esc(o.proximo_passo || '')}</small></div><span class="pill">${rotulo(ETAPAS_FUNIL, o.etapa)}</span></li>`).join('') || '<li class="vazio">Nenhuma oportunidade.</li>'}</ul></section>
+    <section class="card"><h3>Histórico</h3><ul class="lista">${c.crm_interacoes.slice(0, 15).map(x => `<li data-hist="${x.id}" style="cursor:pointer;align-items:flex-start"><span class="pill">${rotulo(TIPOS_CONTATO, x.tipo)}</span><div class="cresce"><small style="white-space:pre-wrap;color:var(--ink)">${esc(x.resumo)}</small></div><span class="mute">${dataBR(x.data)}</span></li>`).join('') || '<li class="vazio">Nenhum contato registrado.</li>'}</ul>
+      <button class="bt peq sec" id="nHist">+ Registrar contato</button></section>
+    <section class="card"><h3>Onboarding</h3>${c.onboarding ? `<p class="mute" style="margin:0 0 6px">${c.onboarding.filter(i => i.feito).length} de ${c.onboarding.length} feitos</p>
+      <ul class="lista">${c.onboarding.map((i, n) => `<li><label style="display:flex;gap:10px;align-items:center;cursor:pointer;flex:1${i.feito ? ';color:var(--mute);text-decoration:line-through' : ''}"><input type="checkbox" data-onb="${n}" ${i.feito ? 'checked' : ''}> ${esc(i.item)}</label></li>`).join('')}</ul>
+      <button class="bt peq fantasma" id="onbItem">+ Item</button>`
+      : `<p class="mute">Checklist de entrada do cliente: contrato, pasta, briefing, acessos, kickoff…</p><button class="bt peq sec" id="onbIni">Iniciar onboarding</button>`}</section>
     ${await propostasDoCliente(id)}${await contratosDoCliente(id)}${await cartaoDrive(c)}
   </div>`;
   ligarCartaoDrive(c, () => cliente(id));
+  $('#nHist').onclick = async () => { if (await registrarContato(id)) cliente(id); };
+  main.querySelectorAll('[data-hist]').forEach(li => li.onclick = async () => { if (await registrarContato(id, null, c.crm_interacoes.find(x => x.id === li.dataset.hist))) cliente(id); });
+  const salvarOnb = async lista => { await q(sb.from('crm_clientes').update({ onboarding: lista }).eq('id', id)); cliente(id); };
+  if ($('#onbIni')) $('#onbIni').onclick = () => salvarOnb(ONBOARDING_PADRAO.map(item => ({ item, feito: false })));
+  main.querySelectorAll('[data-onb]').forEach(cb => cb.onchange = () => salvarOnb(c.onboarding.map((i, n) => n === +cb.dataset.onb ? { ...i, feito: cb.checked } : i)));
+  if ($('#onbItem')) $('#onbItem').onclick = async () => { const v = await formulario('Novo item do onboarding', [{ k: 'item', l: 'Item', req: true }]); if (v) salvarOnb([...c.onboarding, { item: v.item, feito: false }]); };
   main.querySelector('[data-nova-proposta]').onclick = () => novaProposta({ cliente_id: id });
   main.querySelector('[data-novo-contrato]').onclick = () => novoContrato({ cliente_id: id });
   $('#ed').onclick = async () => {
@@ -215,12 +251,12 @@ async function projeto(id, aba = 'etapas') {
   if (!p) { main.innerHTML = '<p class="vazio">Projeto não encontrado.</p>'; return; }
   p.crm_etapas.sort((a, b) => a.ordem - b.ordem); p.crm_etapas.forEach(e => e.crm_entregas.sort((a, b) => a.ordem - b.ordem));
   const es = p.crm_etapas.flatMap(e => e.crm_entregas), ok = es.filter(e => e.status === 'aprovado').length, pct = es.length ? Math.round(100 * ok / es.length) : 0;
-  const c = p.crm_clientes, recebido = p.crm_parcelas.filter(x => x.pago_em).reduce((s, x) => s + +x.valor, 0);
+  const c = p.crm_clientes, recebido = p.crm_parcelas.filter(x => x.pago_em && x.tipo !== 'despesa').reduce((s, x) => s + +x.valor, 0);
   main.innerHTML = `<div class="topo"><div><div class="eyebrow"><a href="#/cliente/${c.id}">${esc(c.empresa || c.nome)}</a></div><h1>${esc(p.nome)}</h1>
       <p>${ok} de ${es.length} entregas aprovadas${p.entrega_prevista ? ' · entrega prevista ' + dataBR(p.entrega_prevista) : ''}</p></div>
     <div class="acoes"><select id="st" class="busca" style="min-width:0">${STATUS_PROJ.map(([k, l]) => `<option value="${k}" ${k === p.status ? 'selected' : ''}>${l}</option>`).join('')}</select><button class="bt sec" id="ed">Editar</button></div></div>
     <div class="barra" style="margin-bottom:20px"><i style="width:${pct}%"></i></div>
-    <div class="tabs"><button data-a="etapas">Etapas e entregas</button><button data-a="financeiro">Financeiro · ${brl(recebido)} de ${brl(p.valor)}</button></div>
+    <div class="tabs"><button data-a="etapas">Etapas e entregas</button><button data-a="tarefas">Tarefas</button><button data-a="financeiro">Financeiro · ${brl(recebido)} de ${brl(p.valor)}</button></div>
     <div id="aba"></div>`;
   main.querySelectorAll('.tabs button').forEach(b => { b.classList.toggle('on', b.dataset.a === aba); b.onclick = () => projeto(id, b.dataset.a); });
   $('#st').onchange = async e => { await q(sb.from('crm_projetos').update({ status: e.target.value }).eq('id', id)); toast('Status atualizado'); };
@@ -233,7 +269,8 @@ async function projeto(id, aba = 'etapas') {
     if (v) { await q(sb.from('crm_projetos').update(v).eq('id', id)); projeto(id, aba); }
   };
   const alvo = $('#aba');
-  if (aba === 'financeiro') return abaFinanceiro(p, alvo);
+  if (aba === 'financeiro') return abaFinanceiro(p, alvo, () => projeto(id, 'financeiro'));
+  if (aba === 'tarefas') return abaTarefas(p, alvo);
   alvo.innerHTML = p.crm_etapas.map((e, i) => `<section class="card etapa" data-etapa="${e.id}">
       <header><div><div class="n">ETAPA ${String(i + 1).padStart(2, '0')}</div><h3>${esc(e.titulo)}</h3></div>
         <div class="acoes"><button class="bt peq fantasma" data-ed-etapa="${e.id}">Editar etapa</button><button class="bt peq sec" data-nova-ent="${e.id}">+ Entrega</button></div></header>
@@ -300,70 +337,6 @@ async function salvarComoModelo(p) {
   const tirar = t => (t || '').replaceAll(p.crm_clientes.empresa || '\u0000', '{{empresa}}').replaceAll((p.crm_clientes.nome || '\u0000').split(' ')[0], '{{contato}}');
   const estrutura = p.crm_etapas.map(e => ({ titulo: e.titulo, orientacao: tirar(e.orientacao), entregas: e.crm_entregas.map(x => x.titulo) }));
   await q(sb.from('crm_modelos').insert({ tipo: 'projeto', titulo: v.titulo, estrutura })); toast('Modelo salvo');
-}
-
-/* ---------- FINANCEIRO ---------- */
-const CAMPOS_PARCELA = [{ k: 'descricao', l: 'Descrição (ex.: entrada, 2ª parcela)' }, { k: 'valor', l: 'Valor (R$)', t: 'number', req: true, meia: true }, { k: 'vencimento', l: 'Vencimento', t: 'date', meia: true },
-  { k: 'forma', l: 'Forma (Pix, boleto…)', meia: true }, { k: 'pago_em', l: 'Pago em (vazio = em aberto)', t: 'date', meia: true }];
-function linhaParcela(x, comProjeto) {
-  const st = x.pago_em ? `<span class="pill p-aprovado">Pago ${dataBR(x.pago_em)}</span>` : venceu(x.vencimento) ? '<span class="pill p-revisao">Atrasada</span>' : '<span class="pill">Em aberto</span>';
-  return `<tr data-parc="${x.id}" style="cursor:pointer"><td>${dataBR(x.vencimento)}</td><td>${comProjeto ? `<b>${esc(x.crm_projetos?.nome)}</b><br><small class="mute">${esc(x.descricao)}</small>` : esc(x.descricao)}</td><td class="dir">${brl(x.valor)}</td><td>${st}</td>
-    <td class="dir">${x.pago_em ? '' : `<button class="bt peq sec" data-pagar="${x.id}">Recebi</button>`}</td></tr>`;
-}
-function ligarParcelas(el, lista, depois) {
-  el.querySelectorAll('[data-pagar]').forEach(b => b.onclick = async ev => { ev.stopPropagation(); await q(sb.from('crm_parcelas').update({ pago_em: hoje() }).eq('id', b.dataset.pagar)); toast('Pagamento registrado'); depois(); });
-  el.querySelectorAll('[data-parc]').forEach(tr => tr.onclick = async () => {
-    const x = lista.find(z => z.id === tr.dataset.parc);
-    const v = await formulario('Parcela', CAMPOS_PARCELA, x, '<button class="bt fantasma" value="apagar" formnovalidate style="justify-self:start;color:var(--bad)">Apagar parcela</button>');
-    if ($('#dlg').returnValue === 'apagar') { await q(sb.from('crm_parcelas').delete().eq('id', x.id)); return depois(); }
-    if (v) { await q(sb.from('crm_parcelas').update(v).eq('id', x.id)); depois(); }
-  });
-}
-function abaFinanceiro(p, el) {
-  const ps = p.crm_parcelas.sort((a, b) => (a.vencimento || '').localeCompare(b.vencimento || ''));
-  const total = ps.reduce((s, x) => s + +x.valor, 0), pago = ps.filter(x => x.pago_em).reduce((s, x) => s + +x.valor, 0);
-  el.innerHTML = `<div class="grade" style="margin-bottom:16px">
-      <div class="card kpi"><div class="rot">Contrato</div><div class="num">${brl(p.valor)}</div></div>
-      <div class="card kpi"><div class="rot">Recebido</div><div class="num">${brl(pago)}</div></div>
-      <div class="card kpi"><div class="rot">Em aberto</div><div class="num">${brl(total - pago)}</div>${p.valor && Math.abs(total - p.valor) > .01 ? `<small class="atrasado">Parcelas somam ${brl(total)}</small>` : ''}</div></div>
-    <div class="card"><div class="acoes" style="justify-content:flex-end;margin-bottom:8px"><button class="bt peq sec" id="dividir">Dividir em parcelas</button><button class="bt peq" id="nParc">+ Parcela</button></div>
-    <table><thead><tr><th>Vence</th><th>Descrição</th><th class="dir">Valor</th><th>Situação</th><th></th></tr></thead><tbody>${ps.map(x => linhaParcela(x)).join('') || '<tr><td colspan="5" class="vazio">Nenhuma parcela lançada.</td></tr>'}</tbody></table></div>`;
-  const recarregar = () => projeto(p.id, 'financeiro');
-  ligarParcelas(el, ps, recarregar);
-  $('#nParc').onclick = async () => { const v = await formulario('Nova parcela', CAMPOS_PARCELA); if (v) { await q(sb.from('crm_parcelas').insert({ ...v, projeto_id: p.id })); recarregar(); } };
-  $('#dividir').onclick = async () => {
-    const v = await formulario('Dividir em parcelas', [{ k: 'valor', l: 'Valor total (R$)', t: 'number', req: true, meia: true }, { k: 'n', l: 'Parcelas', t: 'number', req: true, meia: true }, { k: 'inicio', l: '1º vencimento', t: 'date', req: true, meia: true }, { k: 'forma', l: 'Forma', meia: true }], { valor: p.valor || '', n: 2, inicio: hoje() });
-    if (!v) return;
-    const n = Math.max(1, Math.round(v.n)), base = Math.floor(v.valor * 100 / n) / 100, [a, m, d] = v.inicio.split('-').map(Number);
-    const linhas = Array.from({ length: n }, (_, i) => ({ projeto_id: p.id, descricao: `${i + 1}/${n}`, forma: v.forma,
-      valor: i === n - 1 ? Math.round((v.valor - base * (n - 1)) * 100) / 100 : base,
-      vencimento: new Date(Date.UTC(a, m - 1 + i, Math.min(d, 28))).toISOString().slice(0, 10) }));
-    await q(sb.from('crm_parcelas').insert(linhas));
-    if (!p.valor) await q(sb.from('crm_projetos').update({ valor: v.valor }).eq('id', p.id)); // contrato vazio: assume o total
-    toast(`${n} parcelas lançadas`); recarregar();
-  };
-}
-async function financeiro(filtro = 'abertas') {
-  const ps = await q(sb.from('crm_parcelas').select('*,crm_projetos(id,nome)').order('vencimento'));
-  const mes = hoje().slice(0, 7), em30 = diaLocal(30);
-  const soma = l => l.reduce((s, x) => s + +x.valor, 0);
-  const recMes = soma(ps.filter(x => x.pago_em?.startsWith(mes))), atras = ps.filter(x => !x.pago_em && venceu(x.vencimento)), prox = ps.filter(x => !x.pago_em && !venceu(x.vencimento) && x.vencimento <= em30);
-  const filtros = { abertas: x => !x.pago_em, atrasadas: x => !x.pago_em && venceu(x.vencimento), pagas: x => x.pago_em, todas: () => true };
-  // recebido por mês, últimos 6 meses
-  const meses = Array.from({ length: 6 }, (_, i) => { const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() - 5 + i); return d.toLocaleDateString('sv').slice(0, 7); });
-  const porMes = meses.map(m => soma(ps.filter(x => x.pago_em?.startsWith(m)))), max = Math.max(...porMes, 1);
-  main.innerHTML = `<div class="topo"><div><div class="eyebrow">Dinheiro</div><h1>Financeiro</h1></div></div>
-    <div class="grade" style="margin-bottom:18px">
-      <div class="card kpi"><div class="rot">Recebido este mês</div><div class="num">${brl(recMes)}</div></div>
-      <div class="card kpi"><div class="rot">A receber em 30 dias</div><div class="num">${brl(soma(prox))}</div><small class="mute">${prox.length} parcela(s)</small></div>
-      <div class="card kpi"><div class="rot">Atrasado</div><div class="num ${atras.length ? 'atrasado' : ''}">${brl(soma(atras))}</div><small class="mute">${atras.length} parcela(s)</small></div>
-      <div class="card kpi"><div class="rot">Recebido · 6 meses</div>
-        <div style="display:flex;align-items:flex-end;gap:6px;height:64px;margin-top:8px">${porMes.map((v, i) => `<div title="${meses[i]}: ${brl(v)}" style="flex:1;display:grid;gap:3px;justify-items:center"><div style="width:100%;height:${Math.max(2, 52 * v / max)}px;background:${i === 5 ? 'var(--wine)' : '#c9a06388'};border-radius:3px 3px 0 0"></div><small class="mute" style="font-size:.62rem">${new Date(meses[i] + '-15').toLocaleDateString('pt-BR', { month: 'short' }).replace('.', '')}</small></div>`).join('')}</div></div></div>
-    <div class="tabs">${Object.keys(filtros).map(f => `<button data-f="${f}" class="${f === filtro ? 'on' : ''}">${f[0].toUpperCase() + f.slice(1)}</button>`).join('')}</div>
-    <div class="card"><table><thead><tr><th>Vence</th><th>Projeto</th><th class="dir">Valor</th><th>Situação</th><th></th></tr></thead><tbody>${ps.filter(filtros[filtro]).map(x => linhaParcela(x, true)).join('') || '<tr><td colspan="5" class="vazio">Nada aqui.</td></tr>'}</tbody></table></div>
-    <p class="mute">As parcelas são lançadas dentro de cada projeto, na aba Financeiro.</p>`;
-  main.querySelectorAll('[data-f]').forEach(b => b.onclick = () => financeiro(b.dataset.f));
-  ligarParcelas(main, ps, () => financeiro(filtro));
 }
 
 /* ---------- MODELOS ---------- */

@@ -13,6 +13,9 @@ Site estático (HTML + JS, sem build) com dados no Supabase, projeto **rovya-sti
 - `contratos.js`: contratos recorrente/avulso/misto, assinatura externa + anexo, alertas de vencimento no Início. Nada muda de status sozinho.
 - `supabase/006_comercial.sql`: serviços, propostas, contratos e o código de cliente R001 (dado por trigger no primeiro contrato ou projeto). Já foi aplicado.
 - `drive.js`: Google Drive com escopo `drive.file` (o CRM só enxerga o que ele mesmo criou). Tela **Documentos** cria a estrutura `ROVYA — GESTÃO EMPRESARIAL` com as 18 áreas; a ficha do cliente cria `CLIENTE_R001_NOME` dentro de "07 — Clientes e Onboarding", só com as subpastas marcadas; proposta e contrato têm "Enviar ao Drive" (nome `ROVYA_[COD]_[TIPO]_[data]_V01`). Os IDs ficam em `crm_drive`, `crm_clientes.drive_*` e `crm_documentos` (`supabase/007_drive.sql`, aplicado). O navegador pede à função `crm-google` (ação `token`) um acesso de 1 h e fala direto com o Drive.
+- `tarefas.js`: tarefas manuais (com ou sem projeto), aba Tarefas no projeto e cartão no Início.
+- `financeiro.js`: livro de lançamentos (`crm_parcelas` com `tipo` receita/despesa, categoria, cliente, contrato), CSV, e "Lançar no financeiro" no contrato (mensalidades sem duplicar meses).
+- Ficha do cliente: histórico de contatos (`crm_interacoes`, também pelo botão "Registrar contato" no funil, que atualiza o próximo passo) e checklist de onboarding (`crm_clientes.onboarding`). `supabase/008_operacao.sql` já foi aplicado.
 - `config.js`: endereço e chave publicável do Supabase. Quem protege os dados é o RLS.
 - `supabase/001_crm.sql`: tabelas, RLS, bucket privado `crm-anexos` e a função `crm_projeto_de_modelo`. Já foi aplicado.
 - `supabase/002_seed.sql`: modelo de projeto “Gestão estratégica da comunicação”, com as 6 etapas do Trello da Conecta, as orientações e 29 entregas. Já foi aplicado.

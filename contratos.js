@@ -1,6 +1,7 @@
 // Contratos: recorrentes, avulsos e mistos. Só alerta datas; nada muda de status sozinho.
 import { sb, $, main, esc, brl, hoje, diaLocal, dataBR, toast, q, rotulo, formulario, confirma, listaClientes, opcoesClientes } from './util.js';
 import { enviarAoDrive, criarPastaCliente, linhaDoc } from './drive.js';
+import { lancarMensalidades } from './financeiro.js';
 
 const TIPOS = [['recorrente', 'Recorrente'], ['avulso', 'Avulso'], ['misto', 'Misto']];
 const STATUS = [['vigente', 'Vigente'], ['assinatura', 'Aguardando assinatura'], ['rascunho', 'Rascunho'], ['encerrado', 'Encerrado'], ['cancelado', 'Cancelado']];
@@ -89,18 +90,21 @@ export async function contrato(id) {
   const cli = c.crm_clientes, prop = c.crm_propostas, proj = c.crm_projetos;
   const arqUrl = c.arquivo ? (await sb.storage.from('crm-anexos').createSignedUrl(c.arquivo, 3600)).data?.signedUrl : null;
   const docs = await q(sb.from('crm_documentos').select('*').eq('contrato_id', id).order('criado_em', { ascending: false }));
+  const lanc = await q(sb.from('crm_parcelas').select('valor,pago_em').eq('contrato_id', id).eq('tipo', 'receita'));
+  const lancTot = lanc.reduce((s, x) => s + +x.valor, 0), lancRec = lanc.filter(x => x.pago_em).reduce((s, x) => s + +x.valor, 0);
   const al = avisos(c);
   main.innerHTML = `<div class="topo"><div><div class="eyebrow"><a href="#/contratos">Contratos</a> · <a href="#/cliente/${esc(cli.id)}">${esc(nomeCli(cli))}</a></div><h1>${esc(c.titulo)}</h1>
       <p>${pillTipo(c.tipo)} ${pillStatus(c.status)}${al.map(([t, forte]) => ` · <span class="${forte ? 'atrasado' : ''}">${esc(t)}</span>`).join('')}</p></div>
     <div class="acoes"><select id="st" class="busca" style="min-width:0">${STATUS.map(([k, l]) => `<option value="${k}" ${k === c.status ? 'selected' : ''}>${l}</option>`).join('')}</select>
-      ${proj ? '' : '<button class="bt sec" id="nProj">Criar projeto</button>'}<button class="bt sec" id="ed">Editar</button></div></div>
+      ${proj ? '' : '<button class="bt sec" id="nProj">Criar projeto</button>'}<button class="bt sec" id="lancar">Lançar no financeiro</button><button class="bt sec" id="ed">Editar</button></div></div>
   <div class="grade2">
     <section class="card"><h3>Dados</h3><ul class="lista">
       ${[['Cliente', `<a href="#/cliente/${esc(cli.id)}">${esc(nomeCli(cli))}</a>`], ['Tipo', esc(rotulo(TIPOS, c.tipo))], ['Vigência', vigencia(c)],
         ['Valor mensal', c.valor_mensal != null ? brl(c.valor_mensal) : ''], ['Valor avulso', c.valor_avulso != null ? brl(c.valor_avulso) : ''],
         ['Renovação', c.renovacao_auto ? 'Automática' : 'Manual'], ['Aviso', `${c.aviso_dias} dias antes do fim`],
         ['Proposta', prop ? `<a href="#/proposta/${esc(prop.id)}">${esc(prop.titulo)} · v${esc(prop.versao)}</a>` : ''],
-        ['Projeto', proj ? `<a href="#/projeto/${esc(proj.id)}">${esc(proj.nome)}</a>` : ''], ['Criado em', dataBR(diaDe(c.criado_em))]]
+        ['Projeto', proj ? `<a href="#/projeto/${esc(proj.id)}">${esc(proj.nome)}</a>` : ''],
+        ['Financeiro', lanc.length ? `<a href="#/financeiro">${brl(lancTot)} lançado · ${brl(lancRec)} recebido · ${brl(Math.round((lancTot - lancRec) * 100) / 100)} em aberto</a>` : ''], ['Criado em', dataBR(diaDe(c.criado_em))]]
         .filter(x => x[1]).map(([l, v]) => `<li><span class="mute" style="min-width:110px">${l}</span><span>${v}</span></li>`).join('')}</ul>
       ${c.notas ? `<p style="white-space:pre-wrap">${esc(c.notas)}</p>` : ''}</section>
     <section class="card"><h3>Assinatura</h3><ul class="lista">
@@ -111,6 +115,7 @@ export async function contrato(id) {
       ${docs.map(linhaDoc).join('')}</ul></section>
   </div>`;
   $('#st').onchange = async e => { await q(sb.from('crm_contratos').update({ status: e.target.value }).eq('id', id)); toast('Status atualizado'); contrato(id); };
+  $('#lancar').onclick = async () => { if (await lancarMensalidades(c)) contrato(id); };
   $('#ed').onclick = async () => {
     const v = await pedir('Editar contrato', c, '<button class="bt fantasma" value="apagar" formnovalidate style="justify-self:start;color:var(--bad)">Apagar contrato</button>');
     if ($('#dlg').returnValue === 'apagar') {
