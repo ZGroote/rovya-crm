@@ -1,6 +1,6 @@
 // Google Drive: estrutura da ROVYA, pasta de cada cliente e envio de arquivos.
 // Escopo drive.file: o CRM só enxerga o que ele mesmo criou. Tudo acontece por clique (Manual Mestre).
-import { sb, $, main, esc, hoje, dataBR, toast, q, formulario, funcao } from './util.js';
+import { sb, $, main, esc, hoje, dataBR, toast, q, formulario, funcao, registrarFalha } from './util.js';
 
 export const AREAS = [['00', 'Central de Controle'], ['01', 'Direção e Estratégia'], ['02', 'Administrativo e Jurídico'], ['03', 'Financeiro e Contabilidade'],
   ['04', 'Comercial e Prospecção'], ['05', 'Propostas e Negociações'], ['06', 'Contratos e Documentação'], ['07', 'Clientes e Onboarding'],
@@ -27,7 +27,7 @@ async function token() {
 }
 async function api(url, init = {}) {
   const r = await fetch(url, { ...init, headers: { Authorization: 'Bearer ' + await token(), ...init.headers } });
-  if (!r.ok) { const j = await r.json().catch(() => ({})); throw new Error('Drive: ' + (j.error?.message || r.status)); }
+  if (!r.ok) { const j = await r.json().catch(() => ({})), m = 'Drive: ' + (j.error?.message || r.status); registrarFalha('drive', (init.method || 'GET') + ' ' + url.split('?')[0].replace('https://www.googleapis.com', ''), m); throw new Error(m); }
   return r;
 }
 async function criarPasta(nome, pai) {
@@ -113,7 +113,7 @@ export async function subir(arquivo, nome, pai) {
   const destino = ini.headers.get('Location');
   if (!destino) throw new Error('O Drive não devolveu o endereço de envio.');
   const f = await (await fetch(destino, { method: 'PUT', body: arquivo })).json();
-  if (!f.id) throw new Error('Drive: ' + (f.error?.message || 'falha no envio'));
+  if (!f.id) { const m = 'Drive: ' + (f.error?.message || 'falha no envio'); registrarFalha('drive', 'envio ' + nome, m); throw new Error(m); }
   return f;
 }
 

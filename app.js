@@ -1,4 +1,5 @@
-import { sb, $, main, esc, brl, diaLocal, hoje, dataBR, venceu, toast, q, rotulo, preencher, mdHtml, mdTexto, formulario, confirma, listaClientes, opcoesClientes, funcao } from './util.js';
+import { sb, $, main, esc, brl, diaLocal, hoje, dataBR, venceu, toast, q, rotulo, preencher, mdHtml, mdTexto, formulario, confirma, listaClientes, opcoesClientes, funcao, baixarCsv } from './util.js';
+import { producao, STATUS_ENT, FORMATOS, seloPeca } from './producao.js';
 import { servicos, propostas, proposta, novaProposta, propostasDoCliente } from './comercial.js';
 import { contratos, contrato, novoContrato, alertasContratos, contratosDoCliente } from './contratos.js';
 import { documentos, cartaoDrive, ligarCartaoDrive } from './drive.js';
@@ -8,11 +9,11 @@ import { relatorios } from './relatorios.js';
 import { tarefas, abaTarefas, tarefasDaSemana, linhaTarefa, ligarLinhas } from './tarefas.js';
 
 const ETAPAS_FUNIL = [['contato', 'Primeiro contato'], ['diagnostico', 'Diagnóstico'], ['proposta', 'Proposta enviada'], ['negociacao', 'Negociação'], ['ganho', 'Fechado'], ['perdido', 'Perdido']];
-const STATUS_ENT = [['a_fazer', 'A fazer'], ['produzindo', 'Em produção'], ['enviado', 'Enviado'], ['revisao', 'Em revisão'], ['aprovado', 'Aprovado']];
 const TIPOS_LEAD = [['receptivo', 'Receptivo (chegou até mim)'], ['ativo', 'Ativo (prospecção)']];
 const TIPOS_CONTATO = [['reuniao', 'Reunião'], ['ligacao', 'Ligação'], ['mensagem', 'Mensagem'], ['email', 'E-mail'], ['visita', 'Visita'], ['nota', 'Anotação']];
 const ONBOARDING_PADRAO = ['Contrato assinado', 'Pasta no Drive criada', 'Briefing recebido', 'Acessos recebidos (redes, site, contas)', 'Reunião de início (kickoff)', 'Cronograma enviado ao cliente', 'Primeira cobrança emitida'];
-const STATUS_PROJ = [['ativo', 'Ativo'], ['pausado', 'Pausado'], ['concluido', 'Concluído']];
+const STATUS_PROJ = [['ativo', 'Ativo'], ['pausado', 'Pausado'], ['concluido', 'Concluído'], ['arquivado', 'Arquivado']];
+const RETENCAO = [['5_anos', 'Guardar 5 anos (padrão fiscal/contratual)'], ['2_anos', 'Guardar 2 anos'], ['permanente', 'Permanente (portfólio)'], ['descartar', 'Descartar dados pessoais ao fim do contrato']];
 const TIPOS_MODELO = [['orientacao', 'Orientação de etapa'], ['email', 'E-mail'], ['whatsapp', 'WhatsApp'], ['proposta', 'Proposta'], ['contrato', 'Contrato'], ['termo', 'Termo'], ['outro', 'Outro']];
 
 /* ---------- autenticação ---------- */
@@ -22,7 +23,7 @@ else { const { data: n } = await sb.auth.mfa.getAuthenticatorAssuranceLevel(); i
 $('#sair').onclick = async () => { await sb.auth.signOut(); location.replace('login.html'); };
 
 /* ---------- roteador ---------- */
-const rotas = { '': inicio, funil, clientes, cliente, projetos, projeto, financeiro, agenda, modelos, assistente, servicos, propostas, proposta, contratos, contrato, documentos, tarefas, configuracoes, relatorios };
+const rotas = { '': inicio, funil, clientes, cliente, projetos, projeto, producao: () => producao(abrirEntrega), financeiro, agenda, modelos, assistente, servicos, propostas, proposta, contratos, contrato, documentos, tarefas, configuracoes, relatorios };
 async function rotear() {
   const [r, id] = location.hash.replace(/^#\/?/, '').split('/');
   const fn = rotas[r] || inicio;
@@ -258,12 +259,15 @@ async function projeto(id, aba = 'etapas') {
   const c = p.crm_clientes, recebido = p.crm_parcelas.filter(x => x.pago_em && x.tipo !== 'despesa').reduce((s, x) => s + +x.valor, 0);
   main.innerHTML = `<div class="topo"><div><div class="eyebrow"><a href="#/cliente/${c.id}">${esc(c.empresa || c.nome)}</a></div><h1>${esc(p.nome)}</h1>
       <p>${ok} de ${es.length} entregas aprovadas${p.entrega_prevista ? ' · entrega prevista ' + dataBR(p.entrega_prevista) : ''}</p></div>
-    <div class="acoes"><select id="st" class="busca" style="min-width:0">${STATUS_PROJ.map(([k, l]) => `<option value="${k}" ${k === p.status ? 'selected' : ''}>${l}</option>`).join('')}</select><button class="bt sec" id="ed">Editar</button></div></div>
+    <div class="acoes">${p.status === 'arquivado' ? `<span class="pill">Arquivado ${dataBR(p.arquivado_em)}${p.retencao ? ' · ' + esc(rotulo(RETENCAO, p.retencao).split(' (')[0]) : ''}</span><button class="bt sec" id="desarq">Desarquivar</button>`
+      : `<select id="st" class="busca" style="min-width:0">${STATUS_PROJ.filter(s => s[0] !== 'arquivado').map(([k, l]) => `<option value="${k}" ${k === p.status ? 'selected' : ''}>${l}</option>`).join('')}</select><button class="bt sec" id="encerrar">Encerrar</button>`}<button class="bt sec" id="ed">Editar</button></div></div>
     <div class="barra" style="margin-bottom:20px"><i style="width:${pct}%"></i></div>
     <div class="tabs"><button data-a="etapas">Etapas e entregas</button><button data-a="tarefas">Tarefas</button><button data-a="financeiro">Financeiro · ${brl(recebido)} de ${brl(p.valor)}</button></div>
     <div id="aba"></div>`;
   main.querySelectorAll('.tabs button').forEach(b => { b.classList.toggle('on', b.dataset.a === aba); b.onclick = () => projeto(id, b.dataset.a); });
-  $('#st').onchange = async e => { await q(sb.from('crm_projetos').update({ status: e.target.value }).eq('id', id)); toast('Status atualizado'); };
+  if ($('#st')) $('#st').onchange = async e => { await q(sb.from('crm_projetos').update({ status: e.target.value }).eq('id', id)); toast('Status atualizado'); };
+  if ($('#encerrar')) $('#encerrar').onclick = () => encerrarProjeto(p).then(ok => ok && projeto(id, aba));
+  if ($('#desarq')) $('#desarq').onclick = async () => { if (!await confirma('Desarquivar? O projeto volta como “Concluído”.')) return; await q(sb.from('crm_projetos').update({ status: 'concluido', arquivado_em: null }).eq('id', id)); projeto(id, aba); };
   $('#ed').onclick = async () => {
     const v = await formulario('Editar projeto', [{ k: 'nome', l: 'Nome', req: true }, { k: 'valor', l: 'Valor do contrato (R$)', t: 'number', meia: true }, { k: 'entrega_prevista', l: 'Entrega prevista', t: 'date', meia: true }], p,
       `<div class="acoes"><button class="bt fantasma" value="modelo" formnovalidate>Salvar estrutura como modelo</button><button class="bt fantasma" value="apagar" formnovalidate style="color:var(--bad)">Apagar projeto</button></div>`);
@@ -281,7 +285,7 @@ async function projeto(id, aba = 'etapas') {
       ${e.orientacao ? `<details class="ori"><summary>Orientação para o cliente</summary><div class="txt">${mdHtml(preencher(e.orientacao, c))}</div><button class="bt peq sec" data-copiar="${e.id}">Copiar texto</button></details>` : ''}
       ${e.crm_entregas.map(x => `<div class="ent" data-ent="${x.id}">
         <span class="mute" title="${x.crm_anexos.length} arquivo(s)">${x.crm_anexos.length ? '📎' : ''}</span>
-        <span class="t">${esc(x.titulo)}${x.prazo ? ` <small class="${venceu(x.prazo) && x.status !== 'aprovado' ? 'atrasado' : ''}">· ${dataBR(x.prazo)}</small>` : ''}</span>
+        <span class="t">${esc(x.titulo)} ${seloPeca(x)}${x.prazo ? ` <small class="${venceu(x.prazo) && x.status !== 'aprovado' ? 'atrasado' : ''}">· ${dataBR(x.prazo)}</small>` : ''}</span>
         <select class="stt" data-status="${x.id}">${STATUS_ENT.map(([k, l]) => `<option value="${k}" ${k === x.status ? 'selected' : ''}>${l}</option>`).join('')}</select>
         <button class="bt peq fantasma" data-abrir="${x.id}">Abrir</button></div>`).join('') || '<p class="vazio">Nenhuma entrega nesta etapa.</p>'}
     </section>`).join('') + `<button class="bt sec" id="nEtapa">+ Etapa</button>`;
@@ -312,10 +316,12 @@ async function abrirEntrega(x, p) {
   const links = await Promise.all(anexos.map(async a => { const { data } = await sb.storage.from('crm-anexos').createSignedUrl(a.caminho, 3600); return { ...a, url: data?.signedUrl }; }));
   const extra = `<div><label>Anexos</label><div class="anexos">${links.map(a => `<span><a href="${esc(a.url)}" target="_blank" rel="noopener">${esc(a.nome)}</a> <small class="mute">${((a.tamanho || 0) / 1048576).toFixed(1)} MB</small> <button type="button" class="bt peq fantasma" data-del-anexo="${a.id}">remover</button></span>`).join('') || '<span class="vazio">Nenhum arquivo.</span>'}
     <input type="file" id="arq" multiple></div></div>
+    ${x.revisoes || x.aprovado_em ? `<small class="mute">${x.revisoes ? `Voltou ${x.revisoes}× para revisão. ` : ''}${x.aprovado_em ? 'Aprovada em ' + new Date(x.aprovado_em).toLocaleDateString('pt-BR') + '.' : ''}</small>` : ''}
     <button class="bt fantasma" value="apagar" formnovalidate style="justify-self:start;color:var(--bad)">Apagar entrega</button>`;
   const pr = formulario(x.titulo, [
     { k: 'titulo', l: 'Entrega', req: true },
     { k: 'status', l: 'Status', t: 'select', o: STATUS_ENT, meia: true }, { k: 'prazo', l: 'Prazo', t: 'date', meia: true },
+    { k: 'formato', l: 'Formato da peça', t: 'select', o: [['', '—'], ...[...new Set([...FORMATOS, 'Outro', x.formato].filter(Boolean))].map(f => [f, f])] },
     { k: 'texto', l: 'Texto de entrega para o cliente', t: 'textarea', linhas: 9 },
     { k: 'link', l: 'Link (Canva, Heyzine, Drive…)' }], { ...x, texto: x.texto ?? `${(p.crm_clientes.nome || '').split(' ')[0]}, ` }, extra);
   $('#dlgf').querySelectorAll('[data-del-anexo]').forEach(b => b.onclick = async () => {
@@ -334,6 +340,38 @@ async function abrirEntrega(x, p) {
     await q(sb.from('crm_anexos').insert({ entrega_id: x.id, nome: f.name, caminho, tamanho: f.size }));
   }
   toast('Entrega salva');
+}
+/* ---------- ENCERRAMENTO (Manual Mestre: pendências → exportar entregáveis → retenção → arquivar) ---------- */
+async function encerrarProjeto(p) {
+  const es = p.crm_etapas.flatMap(e => e.crm_entregas);
+  const [tarefas, contratos] = await Promise.all([
+    q(sb.from('crm_tarefas').select('titulo').eq('projeto_id', p.id).neq('status', 'feita')),
+    q(sb.from('crm_contratos').select('titulo').eq('projeto_id', p.id).in('status', ['vigente', 'assinatura']))]);
+  const aReceber = p.crm_parcelas.filter(x => x.tipo !== 'despesa' && !x.pago_em), abertas = es.filter(x => x.status !== 'aprovado');
+  const pend = [
+    ...(abertas.length > 5 ? [`<b>${abertas.length} peças não aprovadas</b> (${STATUS_ENT.map(([k, l]) => [l, abertas.filter(x => x.status === k).length]).filter(z => z[1]).map(([l, n]) => `${n} ${l.toLowerCase()}`).join(', ')})`]
+      : abertas.map(x => `Peça não aprovada: <b>${esc(x.titulo)}</b> (${esc(rotulo(STATUS_ENT, x.status))})`)),
+    ...tarefas.map(t => `Tarefa aberta: <b>${esc(t.titulo)}</b>`),
+    ...aReceber.map(x => `A receber: <b>${esc(x.descricao || 'parcela')}</b> ${brl(x.valor)} · venc. ${dataBR(x.vencimento)}`),
+    ...contratos.map(k => `Contrato ainda vigente: <b>${esc(k.titulo)}</b>`)];
+  const pr = formulario('Encerrar “' + p.nome + '”', [{ k: 'retencao', l: 'Retenção dos dados e arquivos', t: 'select', o: RETENCAO, req: true }], { retencao: '5_anos' },
+    `<div><label>Pendências</label>${pend.length ? `<ul style="margin:6px 0 0;padding-left:18px;line-height:1.6">${pend.map(x => `<li>${x}</li>`).join('')}</ul>` : '<p class="mute" style="margin:4px 0">Nenhuma pendência. ✓</p>'}</div>
+     <div><label>Entregáveis</label><button type="button" class="bt peq sec" id="csvEnt">Baixar lista de entregáveis (CSV)</button> <small class="mute">peças, status, links e arquivos</small></div>
+     ${pend.length ? `<label style="display:flex;gap:8px;align-items:flex-start;font-weight:400"><input type="checkbox" required style="width:auto;margin-top:3px"> Conferi as ${pend.length} pendência(s) acima e quero arquivar mesmo assim.</label>` : ''}
+     <small class="mute">Arquivar não apaga nada: o projeto sai do Início e da Produção e fica em Projetos → Arquivado.</small>`, 'Arquivar projeto');
+  $('#csvEnt').onclick = () => csvEntregaveis(p);
+  const v = await pr; if (!v) return false;
+  await q(sb.from('crm_projetos').update({ status: 'arquivado', arquivado_em: hoje(), retencao: v.retencao }).eq('id', p.id));
+  toast('Projeto arquivado'); return true;
+}
+async function csvEntregaveis(p) {
+  const ids = p.crm_etapas.flatMap(e => e.crm_entregas.map(x => x.id));
+  const anexos = ids.length ? await q(sb.from('crm_anexos').select('entrega_id,nome').in('entrega_id', ids)) : [];
+  const dt = d => d ? d.slice(0, 10).split('-').reverse().join('/') : '';
+  const linhas = [['Etapa', 'Peça', 'Formato', 'Status', 'Revisões', 'Aprovada em', 'Link', 'Arquivos no CRM']];
+  for (const e of p.crm_etapas) for (const x of e.crm_entregas)
+    linhas.push([e.titulo, x.titulo, x.formato, rotulo(STATUS_ENT, x.status), x.revisoes || 0, dt(x.aprovado_em), x.link, anexos.filter(a => a.entrega_id === x.id).map(a => a.nome).join(' | ')]);
+  baixarCsv(linhas, `ROVYA_${p.crm_clientes.codigo || 'CLIENTE'}_ENTREGAVEIS_${hoje()}_V01.csv`);
 }
 async function salvarComoModelo(p) {
   const v = await formulario('Salvar como modelo', [{ k: 'titulo', l: 'Nome do modelo', req: true }], { titulo: p.nome });

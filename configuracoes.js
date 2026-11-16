@@ -11,8 +11,9 @@ const NOMES = { crm_clientes: 'Clientes', crm_oportunidades: 'Funil', crm_intera
 const ACOES = { INSERT: ['criou', 'p-aprovado'], UPDATE: ['alterou', 'p-produzindo'], DELETE: ['apagou', 'p-revisao'] };
 
 export async function configuracoes(filtroLog = '') {
-  const [{ data: fat }, logs] = await Promise.all([
+  const [{ data: fat }, falhas, logs] = await Promise.all([
     sb.auth.mfa.listFactors(),
+    q(sb.from('crm_falhas').select('*').eq('resolvida', false).order('quando', { ascending: false }).limit(30)),
     q((filtroLog ? sb.from('crm_log').select('*').eq('tabela', filtroLog) : sb.from('crm_log').select('*')).order('quando', { ascending: false }).limit(120))]);
   const totp = (fat?.totp || []).find(f => f.status === 'verified');
   main.innerHTML = `<div class="topo"><div><div class="eyebrow">Sistema</div><h1>Configurações</h1><p>Segurança, cópias de segurança e o registro de tudo o que muda no CRM.</p></div></div>
@@ -26,11 +27,15 @@ export async function configuracoes(filtroLog = '') {
         <p class="mute">Todos os dados do CRM em um arquivo JSON (formato aberto). Os arquivos em si já ficam no Drive e no Storage.</p>
         <div class="acoes"><button class="bt sec" id="bkBaixar">Baixar backup</button><button class="bt" id="bkDrive">Salvar no Drive (15 Tecnologia)</button></div></section>
     </div>
+    <section class="card" style="margin-top:18px"><h3>Falhas de integração ${falhas.length ? `<span class="pill p-revisao">${falhas.length}</span>` : ''}</h3>
+      <p class="mute">Quando o Drive, o Google Agenda ou o Assistente falham, fica anotado aqui. Nada é refeito sozinho: confira e tente de novo pela própria tela.</p>
+      <ul class="lista">${falhas.map(f => `<li><div class="cresce"><b>${esc(f.mensagem)}</b><small>${esc(f.origem)}${f.acao ? ' · ' + esc(f.acao) : ''} · ${new Date(f.quando).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</small></div><button class="bt peq sec" data-resolvida="${f.id}">Resolvida</button></li>`).join('') || '<li class="vazio">Nenhuma falha pendente.</li>'}</ul></section>
     <h2 style="margin:28px 0 12px">Registro de alterações</h2>
     <div class="acoes" style="margin-bottom:10px"><select class="busca" id="logFiltro" style="min-width:0"><option value="">Todas as áreas</option>${TABELAS.map(t => `<option value="${t}" ${t === filtroLog ? 'selected' : ''}>${NOMES[t]}</option>`).join('')}</select>
       <small class="mute" style="align-self:center">Últimas 120 alterações. O registro não pode ser editado nem apagado pelo CRM.</small></div>
     <div class="card"><table><thead><tr><th>Quando</th><th>Quem</th><th>O quê</th><th>Detalhes</th><th></th></tr></thead><tbody>${logs.map(linhaLog).join('') || '<tr><td colspan="5" class="vazio">Nada registrado ainda.</td></tr>'}</tbody></table></div>`;
 
+  main.querySelectorAll('[data-resolvida]').forEach(b => b.onclick = async () => { await q(sb.from('crm_falhas').update({ resolvida: true }).eq('id', b.dataset.resolvida)); configuracoes(filtroLog); });
   $('#logFiltro').onchange = e => configuracoes(e.target.value);
   if ($('#mfaAtivar')) $('#mfaAtivar').onclick = () => ativarMfa().then(ok => ok && configuracoes(filtroLog));
   if ($('#mfaDesl')) $('#mfaDesl').onclick = async () => {

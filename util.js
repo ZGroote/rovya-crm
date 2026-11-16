@@ -66,5 +66,15 @@ export const opcoesClientes = cs => cs.map(c => [c.id, (c.codigo ? c.codigo + ' 
 export async function funcao(nome, acao, dados = {}) {
   const { data: { session } } = await sb.auth.getSession();
   const r = await fetch(`${SUPABASE_URL}/functions/v1/${nome}`, { method: 'POST', headers: { Authorization: 'Bearer ' + session.access_token, 'Content-Type': 'application/json' }, body: JSON.stringify({ acao, ...dados }) });
-  const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.erro || 'Falha (' + r.status + ')'); return j;
+  const j = await r.json().catch(() => ({})); if (!r.ok) { const m = j.erro || 'Falha (' + r.status + ')'; registrarFalha(nome, acao, m); throw new Error(m); } return j;
+}
+// guarda a falha de integração para a Sabrina ver em Configurações (nunca quebra a tela se o registro falhar)
+export const registrarFalha = (origem, acao, mensagem) => sb.from('crm_falhas').insert({ origem, acao, mensagem: String(mensagem).slice(0, 500) }).then(() => { }, () => { });
+
+// CSV para o Excel brasileiro (mesma receita do financeiro.js): separador ;, vírgula decimal, BOM UTF-8
+export function baixarCsv(linhas, nome) {
+  const cel = v => '"' + String(v ?? '').replace(/"/g, '""') + '"';
+  const url = URL.createObjectURL(new Blob(['﻿' + linhas.map(l => l.map(cel).join(';')).join('\r\n')], { type: 'text/csv;charset=utf-8' }));
+  Object.assign(document.createElement('a'), { href: url, download: nome }).click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }

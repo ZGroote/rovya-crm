@@ -16,6 +16,9 @@ Site estático (HTML + JS, sem build) com dados no Supabase, projeto **rovya-sti
 - `tarefas.js`: tarefas manuais (com ou sem projeto), aba Tarefas no projeto e cartão no Início.
 - `financeiro.js`: livro de lançamentos (`crm_parcelas` com `tipo` receita/despesa, categoria, cliente, contrato), CSV, e "Lançar no financeiro" no contrato (mensalidades sem duplicar meses).
 - Ficha do cliente: histórico de contatos (`crm_interacoes`, também pelo botão "Registrar contato" no funil, que atualiza o próximo passo) e checklist de onboarding (`crm_clientes.onboarding`). `supabase/008_operacao.sql` já foi aplicado.
+- `producao.js`: tela **Produção**, um quadro com todas as peças (entregas) dos projetos ativos por status (arrastar muda o status). Cada peça tem **formato**, contador de **revisões** (R2 = voltou duas vezes) e data de **aprovação**, que o trigger `crm_entrega` preenche a partir do status escolhido pela Sabrina (`supabase/010_producao.sql`).
+- **Encerrar projeto** (botão no projeto): lista as pendências (peças, tarefas, valores a receber, contratos vigentes), baixa o CSV de entregáveis, pede a retenção e só arquiva com confirmação. "Arquivado" não apaga nada.
+- **Falhas de integração:** erros do Drive, do Google e do Assistente vão para `crm_falhas` e aparecem em Configurações até serem marcados como resolvidos.
 - `config.js`: endereço e chave publicável do Supabase. Quem protege os dados é o RLS.
 - `supabase/001_crm.sql`: tabelas, RLS, bucket privado `crm-anexos` e a função `crm_projeto_de_modelo`. Já foi aplicado.
 - `supabase/002_seed.sql`: modelo de projeto “Gestão estratégica da comunicação”, com as 6 etapas do Trello da Conecta, as orientações e 29 entregas. Já foi aplicado.

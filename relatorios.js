@@ -1,6 +1,6 @@
 // Relatórios e Inteligência: indicadores comerciais, financeiros (regime de caixa) e de operação por período, com exportação CSV.
 // Tudo é calculado no navegador a partir das tabelas crm_* (dataset pequeno).
-import { sb, $, main, esc, brl, hoje, venceu, q, listaClientes } from './util.js';
+import { sb, $, main, esc, brl, hoje, venceu, q, listaClientes, baixarCsv } from './util.js';
 
 const PERIODOS = [['mes', 'Este mês'], ['passado', 'Mês passado'], ['tri', 'Trimestre'], ['ano', 'Ano'], ['pers', 'Personalizado']];
 const TIPOS_LEAD = { receptivo: 'Receptivo', ativo: 'Ativo' };
@@ -144,12 +144,4 @@ export async function relatorios() {
   $('#csv').onclick = () => baixarCsv([['Seção', 'Indicador', 'Valor'], ['Período', 'De', dataNum(ini)], ['Período', 'Até', dataNum(fim)],
     ...[...IND, ...DETALHE].map(([s, i, v, f]) => [s, i, FMT_CSV[f](v)])], 'relatorio-' + sufixo);
   $('#csvCli').onclick = () => baixarCsv([['Código', 'Cliente', 'Recebido'], ...porCliente.map(([cod, nome, v]) => [cod, nome, FMT_CSV.r(v)])], 'receita-por-cliente-' + sufixo);
-}
-
-// CSV para o Excel brasileiro (mesma receita do financeiro.js): separador ;, vírgula decimal, BOM UTF-8
-function baixarCsv(linhas, nome) {
-  const cel = v => '"' + String(v ?? '').replace(/"/g, '""') + '"';
-  const url = URL.createObjectURL(new Blob(['﻿' + linhas.map(l => l.map(cel).join(';')).join('\r\n')], { type: 'text/csv;charset=utf-8' }));
-  Object.assign(document.createElement('a'), { href: url, download: nome }).click();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
