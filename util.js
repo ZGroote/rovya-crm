@@ -37,6 +37,72 @@ export async function q(p) {
   return data;
 }
 
+/* ---------- escrita sem internet (tarefas e registro de contato) ----------
+   Sem conexão, a mudança fica numa fila no aparelho e as telas já a mostram (com ⏳). Quando a conexão volta,
+   vai para o banco na ordem em que foi feita. Se o mesmo campo mudou em outro aparelho nesse meio tempo, a mudança
+   dela vale (nada se perde; o valor anterior fica no registro de alterações) e vira um aviso. */
+const FILA_ESC = 'rovya-escritas-pendentes';
+export const lerEscritas = () => { try { return JSON.parse(localStorage.getItem(FILA_ESC)) || []; } catch { return []; } };
+const gravarEscritas = f => localStorage.setItem(FILA_ESC, JSON.stringify(f));
+export const limparEscritas = () => { try { localStorage.removeItem(FILA_ESC); } catch { } };
+export const campos = (linha, ks) => Object.fromEntries(ks.map(k => [k, linha?.[k] ?? null]));
+async function executar({ tabela, acao, id, dados }) {
+  const t = sb.from(tabela);
+  const { error } = await (acao === 'insert' ? t.insert(dados) : acao === 'update' ? t.update(dados).eq('id', id) : t.delete().eq('id', id));
+  if (error && !(acao === 'insert' && error.code === '23505')) throw error; // 23505: já entrou numa tentativa que perdeu a resposta
+}
+// op: { tabela, acao: 'insert'|'update'|'delete', id?, dados?, antes? (campos como ela viu, para achar conflito), rotulo }
+// devolve 'guardado' (ficou no aparelho) ou true (foi para o banco)
+export async function salvar(op) {
+  if (op.acao === 'insert') { op.dados = { id: crypto.randomUUID(), ...op.dados }; op.id = op.dados.id; } // id daqui: reenviar não duplica
+  if (navigator.onLine) {
+    try { await executar(op); return true; }
+    catch (e) { if (!semRede(e)) { toast(e.message, true); throw e; } }
+  }
+  try { gravarEscritas([...lerEscritas(), { ...op, k: Date.now() + Math.random().toString(36).slice(2), em: new Date().toISOString() }]); }
+  catch (e) { toast('Sem internet e sem espaço neste aparelho: não foi salvo.', true); throw e; }
+  toast('Sem internet: guardado neste aparelho. Vai para o banco quando a conexão voltar.');
+  return 'guardado';
+}
+// as telas leem da cópia (ou do banco) e passam por aqui para já mostrar o que ela fez sem internet
+export function comPendentes(tabela, linhas, filtro = () => true) {
+  let out = [...linhas];
+  for (const op of lerEscritas()) if (op.tabela === tabela) {
+    if (op.acao === 'insert') { if (!out.some(r => r.id === op.id)) out.push({ criado_em: op.em, ...op.dados, _pendente: true }); }
+    else if (op.acao === 'update') out = out.map(r => r.id === op.id ? { ...r, ...op.dados, _pendente: true } : r);
+    else out = out.filter(r => r.id !== op.id);
+  }
+  return out.filter(filtro);
+}
+// envia a fila; devolve quantas foram
+export function enviarEscritas() {
+  if (!navigator.onLine || !lerEscritas().length) return Promise.resolve(0);
+  const rodar = async () => {
+    let n = 0;
+    const tirar = k => { try { gravarEscritas(lerEscritas().filter(x => x.k !== k)); } catch { } };
+    for (const op of lerEscritas()) {
+      try {
+        if (op.acao === 'update' && op.antes) {
+          const { data, error } = await sb.from(op.tabela).select(Object.keys(op.antes).join(',')).eq('id', op.id).maybeSingle();
+          if (error) throw error;
+          if (!data) { registrarFalha('sem internet', op.acao, `${op.rotulo}: foi alterado sem internet, mas já tinha sido apagado em outro aparelho. A alteração não foi aplicada.`); tirar(op.k); continue; }
+          const mudou = Object.keys(op.antes).filter(k => JSON.stringify(data[k] ?? null) !== JSON.stringify(op.antes[k]));
+          if (mudou.length) registrarFalha('sem internet', 'conflito', `${op.rotulo}: foi alterado sem internet, mas ${mudou.join(', ')} já tinha mudado em outro aparelho. Ficou a versão feita sem internet; a anterior está em Configurações → Registro de alterações.`);
+        }
+        await executar(op); tirar(op.k); n++;
+      } catch (e) {
+        if (semRede(e)) break;
+        if (/^2[23]/.test(e.code || '')) { // dado recusado pelo banco (ex.: projeto apagado): não adianta repetir
+          registrarFalha('sem internet', op.acao, `${op.rotulo}: feito sem internet, mas o banco recusou (${e.message}). Refaça pela tela.`); tirar(op.k); continue;
+        }
+        break; // outro erro (login vencendo, servidor fora): tenta de novo mais tarde, na mesma ordem
+      }
+    }
+    return n;
+  };
+  return navigator.locks ? navigator.locks.request('rovya-escritas', { ifAvailable: true }, l => l ? rodar() : 0) : rodar();
+}
+
 export const rotulo = (lista, v) => (lista.find(x => x[0] === v) || [, v])[1];
 
 // preenche {{empresa}}, {{contato}}, {{cliente}} com os dados do cliente

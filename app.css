@@ -165,9 +165,10 @@ dialog .dupla{display:grid;grid-template-columns:1fr 1fr;gap:12px}
 .sugestoes{display:flex;gap:6px;flex-wrap:wrap}
 @media (max-width:760px){.msgs{max-height:none;min-height:50vh}.msg{max-width:90%}}
 /* sem internet: faixa no rodapé, compromissos guardados no aparelho e avisos no Início */
-body.sem-rede #main::before{content:"Sem internet · mostrando os dados salvos neste aparelho." attr(data-copia) " Compromissos novos vão para o Google quando a conexão voltar.";display:block;margin-bottom:16px;padding:9px 14px;border-radius:8px;background:var(--wine2);color:#fff;font:500 .8rem/1.4 Inter}
+body.sem-rede #main::before{content:"Sem internet · mostrando os dados salvos neste aparelho." attr(data-copia) " Tarefas, contatos e compromissos feitos agora são enviados quando a conexão voltar.";display:block;margin-bottom:16px;padding:9px 14px;border-radius:8px;background:var(--wine2);color:#fff;font:500 .8rem/1.4 Inter}
 .ev.pendente{border-style:dashed;border-color:var(--warn)}
 .ev .pend{color:var(--warn);font-weight:500}
 .avisos{border-color:var(--warn);background:#b7791f0d;margin-bottom:18px}
 .avisos li{font-size:.92rem}
 @media (max-width:760px){#toast{bottom:calc(78px + env(safe-area-inset-bottom))}}
+.pill.pend{background:#b7791f1f;color:var(--warn)}

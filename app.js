@@ -1,4 +1,4 @@
-import { sb, $, main, esc, brl, diaLocal, hoje, dataBR, venceu, toast, q, rotulo, preencher, mdHtml, mdTexto, formulario, confirma, listaClientes, opcoesClientes, funcao, baixarCsv, semRede, sessaoSalva, registrarFalha, anexosGrandes, LIMITE_ANEXO_MB } from './util.js';
+import { sb, $, main, esc, brl, diaLocal, hoje, dataBR, venceu, toast, q, rotulo, preencher, mdHtml, mdTexto, formulario, confirma, listaClientes, opcoesClientes, funcao, baixarCsv, semRede, sessaoSalva, registrarFalha, anexosGrandes, LIMITE_ANEXO_MB, salvar, comPendentes, campos, lerEscritas, limparEscritas, enviarEscritas } from './util.js';
 import { producao, STATUS_ENT, FORMATOS, seloPeca } from './producao.js';
 import { servicos, propostas, proposta, novaProposta, propostasDoCliente } from './comercial.js';
 import { contratos, contrato, novoContrato, alertasContratos, contratosDoCliente } from './contratos.js';
@@ -6,7 +6,7 @@ import { documentos, cartaoDrive, ligarCartaoDrive } from './drive.js';
 import { financeiro, abaFinanceiro } from './financeiro.js';
 import { configuracoes } from './configuracoes.js';
 import { relatorios } from './relatorios.js';
-import { tarefas, abaTarefas, tarefasDaSemana, linhaTarefa, ligarLinhas } from './tarefas.js';
+import { tarefas, abaTarefas, tarefasDaSemana, linhaTarefa, ligarLinhas, projetosAtivos } from './tarefas.js';
 
 const ETAPAS_FUNIL = [['contato', 'Primeiro contato'], ['diagnostico', 'Diagnóstico'], ['proposta', 'Proposta enviada'], ['negociacao', 'Negociação'], ['ganho', 'Fechado'], ['perdido', 'Perdido']];
 const TIPOS_LEAD = [['receptivo', 'Receptivo (chegou até mim)'], ['ativo', 'Ativo (prospecção)']];
@@ -24,10 +24,11 @@ if (!(navigator.onLine === false && sessaoSalva())) {
   else { const { data: n } = await sb.auth.mfa.getAuthenticatorAssuranceLevel(); if (n?.nextLevel === 'aal2' && n.currentLevel !== 'aal2') location.replace('login.html'); } // falta o código do MFA
 }
 $('#sair').onclick = async () => {
-  const n = lerFila().length;
-  if (n && !await confirma(`${n} compromisso(s) ainda não foram para o Google. Sair apaga isso deste aparelho. Sair mesmo assim?`)) return;
+  const n = lerFila().length + lerEscritas().length;
+  if (n && !await confirma(`${n} coisa(s) feitas sem internet ainda não foram enviadas. Sair apaga isso deste aparelho. Sair mesmo assim?`)) return;
   await sb.auth.signOut().catch(() => { });
   try { localStorage.removeItem(FILA); } catch { }
+  limparEscritas();
   await window.caches?.delete('rovya-v1').catch(() => { }); // cópia dos dados (sw.js) não fica no aparelho depois de sair
   location.replace('login.html');
 };
@@ -66,7 +67,7 @@ async function novoCliente() {
 /* ---------- INÍCIO ---------- */
 async function inicio() {
   const em7 = diaLocal(7);
-  const [ops, ents, parc, projs, alertas, tars, falhas] = await Promise.all([
+  const [opsLidas, ents, parc, projs, alertas, tars, falhas] = await Promise.all([
     q(sb.from('crm_oportunidades').select('id,titulo,proximo_passo,proximo_em,etapa,crm_clientes(nome)').not('etapa', 'in', '(ganho,perdido)').not('proximo_em', 'is', null).lte('proximo_em', em7).order('proximo_em')),
     q(sb.from('crm_entregas').select('id,titulo,prazo,status,crm_etapas!inner(projeto_id,crm_projetos!inner(nome,status))').neq('status', 'aprovado').eq('crm_etapas.crm_projetos.status', 'ativo').not('prazo', 'is', null).lte('prazo', em7).order('prazo')),
     q(sb.from('crm_parcelas').select('id,descricao,valor,vencimento,crm_projetos(nome)').eq('tipo', 'receita').is('pago_em', null).lte('vencimento', em7).order('vencimento')),
@@ -75,8 +76,10 @@ async function inicio() {
     tarefasDaSemana(),
     sb.from('crm_falhas').select('id,mensagem').eq('resolvida', false).order('quando', { ascending: false }).limit(5).then(r => r.data || [], () => []),
   ]);
-  const nFila = lerFila().length;
-  const avisos = [...falhas.map(f => esc(f.mensagem)), ...(nFila ? [`${nFila} compromisso(s) guardado(s) neste aparelho, esperando internet para ir ao Google.`] : [])];
+  const ops = comPendentes('crm_oportunidades', opsLidas, o => !['ganho', 'perdido'].includes(o.etapa) && o.proximo_em && o.proximo_em <= em7).sort((a, b) => a.proximo_em.localeCompare(b.proximo_em));
+  const nFila = lerFila().length, nEsc = lerEscritas().length;
+  const avisos = [...falhas.map(f => esc(f.mensagem)), ...(nFila ? [`${nFila} compromisso(s) guardado(s) neste aparelho, esperando internet para ir ao Google.`] : []),
+    ...(nEsc ? [`${nEsc} alteração(ões) (tarefas, contatos) guardada(s) neste aparelho, esperando internet.`] : [])];
   const h = new Date().getHours(), saud = h < 12 ? 'Bom dia' : h < 18 ? 'Boa tarde' : 'Boa noite';
   const progresso = p => { const es = p.crm_etapas.flatMap(e => e.crm_entregas); return es.length ? Math.round(100 * es.filter(e => e.status === 'aprovado').length / es.length) : 0; };
   main.innerHTML = `
@@ -138,13 +141,18 @@ async function registrarContato(clienteId, o = null, x = null) {
   if (o) campos.push({ k: 'proximo_passo', l: 'Próximo passo (atualiza o funil)' }, { k: 'proximo_em', l: 'Quando', t: 'date' });
   const v = await formulario(x ? 'Editar registro' : 'Registrar contato', campos, x || { tipo: 'reuniao', data: hoje(), proximo_passo: o?.proximo_passo, proximo_em: o?.proximo_em },
     x ? '<button class="bt fantasma" value="apagar" formnovalidate style="justify-self:start;color:var(--bad)">Apagar registro</button>' : '');
-  if (x && $('#dlg').returnValue === 'apagar') { if (await confirma('Apagar este registro do histórico?')) await q(sb.from('crm_interacoes').delete().eq('id', x.id)); return true; }
+  if (x && $('#dlg').returnValue === 'apagar') { if (await confirma('Apagar este registro do histórico?')) await salvar({ tabela: 'crm_interacoes', acao: 'delete', id: x.id, rotulo: 'Registro de contato' }); return true; }
   if (!v) return false;
   const { proximo_passo, proximo_em, ...reg } = v;
-  if (x) await q(sb.from('crm_interacoes').update(reg).eq('id', x.id));
-  else await q(sb.from('crm_interacoes').insert({ ...reg, cliente_id: clienteId, oportunidade_id: o?.id ?? null }));
-  if (o) await q(sb.from('crm_oportunidades').update({ proximo_passo, proximo_em, atualizado_em: new Date().toISOString() }).eq('id', o.id));
-  toast('Registrado no histórico'); return true;
+  const rot = `Contato de ${dataBR(reg.data)}`;
+  let r = x ? await salvar({ tabela: 'crm_interacoes', acao: 'update', id: x.id, dados: reg, antes: campos(x, Object.keys(reg)), rotulo: rot })
+    : await salvar({ tabela: 'crm_interacoes', acao: 'insert', dados: { ...reg, cliente_id: clienteId, oportunidade_id: o?.id ?? null }, rotulo: rot });
+  if (o && (o.proximo_passo !== proximo_passo || o.proximo_em !== proximo_em)) {
+    const r2 = await salvar({ tabela: 'crm_oportunidades', acao: 'update', id: o.id, dados: { proximo_passo, proximo_em, atualizado_em: new Date().toISOString() },
+      antes: campos(o, ['proximo_passo', 'proximo_em']), rotulo: `Próximo passo de “${o.titulo}”` });
+    if (r2 !== true) r = r2;
+  }
+  if (r === true) toast('Registrado no histórico'); return true;
 }
 async function moverOportunidade(o, etapa, extra = {}) {
   const fim = ['ganho', 'perdido'].includes(etapa), agora = new Date().toISOString();
@@ -155,7 +163,7 @@ async function moverOportunidade(o, etapa, extra = {}) {
   }
 }
 async function funil() {
-  const ops = await q(sb.from('crm_oportunidades').select('*,crm_clientes(nome,empresa)').order('ordem'));
+  const ops = comPendentes('crm_oportunidades', await q(sb.from('crm_oportunidades').select('*,crm_clientes(nome,empresa)').order('ordem')));
   main.innerHTML = `<div class="topo"><div><div class="eyebrow">Comercial</div><h1>Funil</h1><p>Arraste os cartões entre as colunas. Ao chegar em “Fechado”, o projeto é criado a partir do seu modelo.</p></div>
     <button class="bt" id="nOp">+ Oportunidade</button></div>
     <div class="funil">${ETAPAS_FUNIL.map(([k, l]) => {
@@ -200,7 +208,8 @@ async function clientes() {
 }
 async function cliente(id) {
   const [c] = await q(sb.from('crm_clientes').select('*,crm_oportunidades(*),crm_projetos(id,nome,status,valor),crm_interacoes(*)').eq('id', id));
-  c.crm_interacoes.sort((a, b) => b.data.localeCompare(a.data) || b.criado_em.localeCompare(a.criado_em));
+  c.crm_interacoes = comPendentes('crm_interacoes', c.crm_interacoes, x => x.cliente_id === id); c.crm_oportunidades = comPendentes('crm_oportunidades', c.crm_oportunidades);
+  c.crm_interacoes.sort((a, b) => b.data.localeCompare(a.data) || (b.criado_em || '').localeCompare(a.criado_em || ''));
   if (!c) { main.innerHTML = '<p class="vazio">Cliente não encontrado.</p>'; return; }
   const zap = c.telefone ? 'https://wa.me/' + c.telefone.replace(/\D/g, '').replace(/^(?!55)/, '55') : null;
   main.innerHTML = `<div class="topo"><div><div class="eyebrow"><a href="#/clientes">Clientes</a>${c.codigo ? ' · ' + esc(c.codigo) : ''}</div><h1>${esc(c.nome)}</h1><p>${esc(c.empresa)}</p></div>
@@ -213,7 +222,7 @@ async function cliente(id) {
     <section class="card"><h3>Projetos</h3><ul class="lista">${c.crm_projetos.map(p => `<li><a class="cresce" href="#/projeto/${p.id}"><b>${esc(p.nome)}</b></a><span class="pill">${rotulo(STATUS_PROJ, p.status)}</span></li>`).join('') || '<li class="vazio">Nenhum projeto.</li>'}</ul>
       <button class="bt peq sec" id="nProj">+ Projeto</button></section>
     <section class="card"><h3>Oportunidades</h3><ul class="lista">${c.crm_oportunidades.map(o => `<li data-op="${o.id}" style="cursor:pointer"><div class="cresce"><b>${esc(o.titulo)}</b><small>${o.valor ? brl(o.valor) + ' · ' : ''}${esc(o.proximo_passo || '')}</small></div><span class="pill">${rotulo(ETAPAS_FUNIL, o.etapa)}</span></li>`).join('') || '<li class="vazio">Nenhuma oportunidade.</li>'}</ul></section>
-    <section class="card"><h3>Histórico</h3><ul class="lista">${c.crm_interacoes.slice(0, 15).map(x => `<li data-hist="${x.id}" style="cursor:pointer;align-items:flex-start"><span class="pill">${rotulo(TIPOS_CONTATO, x.tipo)}</span><div class="cresce"><small style="white-space:pre-wrap;color:var(--ink)">${esc(x.resumo)}</small></div><span class="mute">${dataBR(x.data)}</span></li>`).join('') || '<li class="vazio">Nenhum contato registrado.</li>'}</ul>
+    <section class="card"><h3>Histórico</h3><ul class="lista">${c.crm_interacoes.slice(0, 15).map(x => `<li data-hist="${x.id}" style="cursor:pointer;align-items:flex-start"><span class="pill">${rotulo(TIPOS_CONTATO, x.tipo)}</span><div class="cresce"><small style="white-space:pre-wrap;color:var(--ink)">${esc(x.resumo)}</small></div>${x._pendente ? '<span class="pill pend" title="Guardado neste aparelho; vai para o banco quando a internet voltar">⏳</span>' : ''}<span class="mute">${dataBR(x.data)}</span></li>`).join('') || '<li class="vazio">Nenhum contato registrado.</li>'}</ul>
       <button class="bt peq sec" id="nHist">+ Registrar contato</button></section>
     <section class="card"><h3>Onboarding</h3>${c.onboarding ? `<p class="mute" style="margin:0 0 6px">${c.onboarding.filter(i => i.feito).length} de ${c.onboarding.length} feitos</p>
       <ul class="lista">${c.onboarding.map((i, n) => `<li><label style="display:flex;gap:10px;align-items:center;cursor:pointer;flex:1${i.feito ? ';color:var(--mute);text-decoration:line-through' : ''}"><input type="checkbox" data-onb="${n}" ${i.feito ? 'checked' : ''}> ${esc(i.item)}</label></li>`).join('')}</ul>
@@ -642,6 +651,7 @@ async function copiar() {
       if (!navigator.onLine) return; // caiu no meio: não marca como completa
       await f.contentWindow.irPara(r); await new Promise(ok => setTimeout(ok, 300)); // 300 ms: chamadas que a tela dispara sem esperar (agenda do dia)
     }
+    await Promise.all([listaClientes(), projetosAtivos()]).catch(() => { }); // listas dos formulários (nova tarefa, compromisso)
     try { localStorage.setItem(COPIA, Date.now()); } catch { }
     marcarCopia();
   } catch (e) { console.warn('cópia completa:', e.message); } finally { f.remove(); }
@@ -659,10 +669,12 @@ if (COPIA_MODO) {
   /* ---------- sem internet ---------- */
   const faixaRede = () => document.body.classList.toggle('sem-rede', !navigator.onLine);
   addEventListener('offline', faixaRede);
-  addEventListener('online', () => { faixaRede(); enviarPendentes(); copiaCompleta(); if (!$('#dlg').open) rotear(); }); // voltou: atualiza a tela com os dados novos
+  // alterações feitas sem internet: envia e atualiza a tela
+  const sincronizar = async () => { const n = await enviarEscritas(); if (n) { toast(`${n} alteração(ões) feita(s) sem internet foram salvas`); if (!$('#dlg').open) rotear(); } };
+  addEventListener('online', async () => { faixaRede(); await sincronizar(); enviarPendentes(); copiaCompleta(); if (!$('#dlg').open) rotear(); }); // voltou: atualiza a tela com os dados novos
   faixaRede(); marcarCopia();
-  setTimeout(enviarPendentes, 3000);
+  setTimeout(() => { sincronizar(); enviarPendentes(); }, 3000);
   setTimeout(copiaCompleta, 10000); // depois da primeira tela, para não disputar com ela
-  setInterval(() => { enviarPendentes(); copiaCompleta(); }, 120000); // o evento "online" falha em alguns celulares
+  setInterval(() => { sincronizar(); enviarPendentes(); copiaCompleta(); }, 120000); // o evento "online" falha em alguns celulares
   rotear();
 }
