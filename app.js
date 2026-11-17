@@ -36,6 +36,19 @@ $('#sair').onclick = async () => {
 // ?copia=1: este é o quadro invisível da cópia completa (só abre telas para o sw.js guardar; ver copiaCompleta)
 const COPIA_MODO = new URLSearchParams(location.search).has('copia');
 
+// erro de código na tela vai para o cartão "Falhas" de Configurações (origem 'tela'): dá para corrigir sem ela
+// precisar descrever. Sem internet não é bug; no máximo 5 por visita, sem repetir.
+const errosVistos = new Set();
+function registrarErro(msg, onde = '') {
+  msg = String(msg || 'erro desconhecido').slice(0, 300);
+  if (semRede({ message: msg }) || msg === 'Script error.' || errosVistos.has(msg) || errosVistos.size >= 5) return;
+  errosVistos.add(msg);
+  registrarFalha('tela', (COPIA_MODO ? 'cópia ' : '') + (location.hash || '#/'), msg + (onde ? ` (${onde})` : ''));
+}
+addEventListener('error', e => { // erro de outro endereço (extensão do navegador) não é do CRM
+  if (!e.filename || e.filename.startsWith(location.origin)) registrarErro(e.message, e.filename ? `${e.filename.split('/').pop().split('?')[0]}:${e.lineno}` : ''); });
+addEventListener('unhandledrejection', e => registrarErro(e.reason?.message || e.reason));
+
 /* ---------- roteador ---------- */
 const rotas = { '': inicio, funil, clientes, cliente, projetos, projeto, producao: () => producao(abrirEntrega), financeiro, agenda, modelos, assistente, servicos, propostas, proposta, contratos, contrato, documentos, tarefas, configuracoes, relatorios };
 async function rotear() {
@@ -44,7 +57,7 @@ async function rotear() {
   document.querySelectorAll('#nav a').forEach(a => a.classList.toggle('on', a.dataset.r === (r || 'inicio') || (a.dataset.r + 's') === r || (r === 'cliente' && a.dataset.r === 'clientes') || (r === 'projeto' && a.dataset.r === 'projetos') || (r === 'proposta' && a.dataset.r === 'propostas') || (r === 'contrato' && a.dataset.r === 'contratos')));
   main.innerHTML = '<p class="vazio">Carregando…</p>';
   try { await fn(id); } catch (e) {
-    console.error(e);
+    console.error(e); registrarErro(e.message, 'ao abrir a tela');
     main.innerHTML = `<p class="vazio">${semRede(e) ? 'Sem internet, e esta tela ainda não tinha sido aberta neste aparelho, então não há cópia salva dela.' : 'Não consegui carregar: ' + esc(e.message)}</p>`;
   }
   if (!COPIA_MODO) main.focus({ preventScroll: true }); // o quadro da cópia não pode roubar o cursor de quem está digitando
@@ -74,7 +87,8 @@ async function inicio() {
     q(sb.from('crm_projetos').select('id,nome,crm_clientes(nome),crm_etapas(crm_entregas(status))').eq('status', 'ativo').order('criado_em', { ascending: false })),
     alertasContratos(),
     tarefasDaSemana(),
-    sb.from('crm_falhas').select('id,mensagem').eq('resolvida', false).order('quando', { ascending: false }).limit(5).then(r => r.data || [], () => []),
+    // erros de código (origem 'tela') ficam só em Configurações: são para quem mantém o CRM, não para a Sabrina
+    sb.from('crm_falhas').select('id,mensagem').eq('resolvida', false).neq('origem', 'tela').order('quando', { ascending: false }).limit(5).then(r => r.data || [], () => []),
   ]);
   const ops = comPendentes('crm_oportunidades', opsLidas, o => !['ganho', 'perdido'].includes(o.etapa) && o.proximo_em && o.proximo_em <= em7).sort((a, b) => a.proximo_em.localeCompare(b.proximo_em));
   const nFila = lerFila().length, nEsc = lerEscritas().length;

@@ -43,6 +43,47 @@ async function tokenGoogle() {
   return { token: j.access_token as string, email: data.email as string };
 }
 
+// Backup semanal (pg_cron, 014_backup.sql): todas as tabelas do CRM num JSON na pasta "15 — Tecnologia e Sistemas".
+// Mesma lista e formato do backup manual (configuracoes.js), então o roteiro de restauração do LEIA-ME vale para os dois.
+// Guarda os 12 automáticos mais recentes; os anteriores vão para a lixeira do Drive (recuperáveis por 30 dias).
+const TABELAS = ['crm_clientes', 'crm_oportunidades', 'crm_interacoes', 'crm_servicos', 'crm_propostas', 'crm_contratos', 'crm_projetos', 'crm_etapas',
+  'crm_entregas', 'crm_anexos', 'crm_tarefas', 'crm_parcelas', 'crm_modelos', 'crm_documentos', 'crm_drive'];
+const MANTER = 12, DRIVE = 'https://www.googleapis.com/drive/v3/files';
+async function backupSemanal() {
+  const falha = async (m: string) => { await db.from('crm_falhas').insert({ origem: 'backup', acao: 'backup semanal', mensagem: m }); return { ok: false, erro: m }; };
+  const t = await tokenGoogle();
+  if (!t) return falha('O backup automático da semana não foi feito: o Google da Rovya não está conectado (Agenda → Conectar). Enquanto isso, baixe um backup manual em Configurações.');
+  const { data: pasta } = await db.from('crm_drive').select('folder_id').eq('chave', '15').maybeSingle();
+  if (!pasta?.folder_id) return falha('O backup automático da semana não foi feito: a pasta “15 — Tecnologia e Sistemas” ainda não existe no Drive. Em Documentos, clique em “Conferir estrutura”.');
+  const tabelas: Record<string, unknown[]> = {};
+  for (const tb of TABELAS) {
+    let todos: unknown[] = [];
+    for (let de = 0; ; de += 1000) { // de 1000 em 1000 (limite da API)
+      const { data, error } = await db.from(tb).select('*').range(de, de + 999);
+      if (error) return falha(`O backup automático falhou ao ler ${tb}: ${error.message}`);
+      todos = todos.concat(data); if (data.length < 1000) break;
+    }
+    tabelas[tb] = todos;
+  }
+  const dia = new Date().toLocaleDateString('sv', { timeZone: 'America/Sao_Paulo' }), nome = `ROVYA_BACKUP_${dia}_AUTO.json`;
+  const corpo = JSON.stringify({ sistema: 'ROVYA OS', gerado_em: new Date().toISOString(), versao: 1, automatico: true, tabelas }, null, 1);
+  const auth = { Authorization: 'Bearer ' + t.token };
+  // envio resumível: não tem o limite de 5 MB do envio simples
+  const ini = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&fields=id,name', { method: 'POST',
+    headers: { ...auth, 'Content-Type': 'application/json; charset=UTF-8', 'X-Upload-Content-Type': 'application/json' }, body: JSON.stringify({ name: nome, parents: [pasta.folder_id] }) });
+  const destino = ini.headers.get('Location');
+  if (!ini.ok || !destino) return falha(`O backup automático não foi salvo no Drive (${(await ini.json().catch(() => ({}))).error?.message || ini.status}). Baixe um backup manual em Configurações.`);
+  const r = await fetch(destino, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: corpo });
+  const f = await r.json().catch(() => ({}));
+  if (!r.ok || !f.id) return falha(`O backup automático não foi salvo no Drive (${f.error?.message || r.status}). Baixe um backup manual em Configurações.`);
+  // rodízio: só os automáticos que o CRM criou nessa pasta (drive.file não enxerga outros arquivos)
+  const q = `'${pasta.folder_id}' in parents and name contains '_AUTO.json' and trashed = false`;
+  const l = await (await fetch(`${DRIVE}?${new URLSearchParams({ q, orderBy: 'createdTime desc', fields: 'files(id)', pageSize: '100' })}`, { headers: auth })).json().catch(() => ({}));
+  for (const velho of (l.files ?? []).slice(MANTER))
+    await fetch(`${DRIVE}/${velho.id}`, { method: 'PATCH', headers: { ...auth, 'Content-Type': 'application/json' }, body: JSON.stringify({ trashed: true }) });
+  return { ok: true, arquivo: f.name, bytes: corpo.length };
+}
+
 Deno.serve(async req => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors });
   if (!CID || !CSEC) return json({ erro: 'Google Agenda ainda não configurado (faltam GOOGLE_CLIENT_ID/SECRET).' }, 503);
@@ -59,6 +100,14 @@ Deno.serve(async req => {
     const cal = await (await fetch(CAL + '?maxResults=1', { headers: { Authorization: 'Bearer ' + j.access_token } })).json();
     await db.from('crm_google').upsert({ id: 1, email: cal.summary ?? null, refresh_token: j.refresh_token, conectado_em: new Date().toISOString() });
     return Response.redirect(deb64(volta64), 302);
+  }
+
+  // chamada do pg_cron (backup semanal): header x-cron = crm_config.cron_key, a mesma chave do resumo diário
+  const cron = req.headers.get('x-cron');
+  if (cron) {
+    const { data } = await db.from('crm_config').select('valor').eq('chave', 'cron_key').maybeSingle();
+    if (!data?.valor || cron !== data.valor) return json({ erro: 'Sem permissão' }, 401);
+    return json(await backupSemanal());
   }
 
   if (!await eAdmin(req)) return json({ erro: 'Sem permissão' }, 401);

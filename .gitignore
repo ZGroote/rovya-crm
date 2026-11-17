@@ -2,3 +2,5 @@ img/rosa.png
 supabase/002_seed.sql
 _mock/
 _mock.html
+testes/saida/
+__pycache__/

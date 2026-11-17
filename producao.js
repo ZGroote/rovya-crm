@@ -26,7 +26,8 @@ export async function producao(abrirEntrega, projetoId = '') {
         ${x.prazo && k !== 'aprovado' ? `<small class="${venceu(x.prazo) ? 'atrasado' : ''}">prazo ${dataBR(x.prazo)}</small>` : ''}
         ${k === 'aprovado' && x.aprovado_em ? `<small>aprovado ${dataBR(x.aprovado_em.slice(0, 10))}</small>` : ''}</article>`; }).join('')}</section>`;
     }).join('')}</div>`;
-  const recarregar = () => producao(abrirEntrega, projetoId);
+  // só redesenha se ela ainda estiver na Produção (senão o redesenho atrasado cobriria a tela para onde ela foi)
+  const recarregar = () => { if (location.hash.startsWith('#/producao')) producao(abrirEntrega, projetoId); };
   $('#filtroProj').onchange = e => producao(abrirEntrega, e.target.value);
   const porId = Object.fromEntries(es.map(x => [x.id, x]));
   main.querySelectorAll('.op').forEach(el => {

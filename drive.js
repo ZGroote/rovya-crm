@@ -2,8 +2,11 @@
 // Escopo drive.file: o CRM só enxerga o que ele mesmo criou. Tudo acontece por clique (Manual Mestre).
 import { sb, $, main, esc, hoje, dataBR, toast, q, formulario, confirma, funcao, registrarFalha } from './util.js';
 
-// as áreas da estrutura ficam em crm_drive (a Sabrina inclui e tira pela tela Documentos); '07' guarda as pastas dos clientes
+// as áreas da estrutura ficam em crm_drive (a Sabrina inclui e tira pela tela Documentos).
+// Estas o próprio CRM usa, então não podem ser removidas:
 const AREA_CLIENTES = '07';
+export const AREA_BACKUP = '15';
+const AREAS_FIXAS = { [AREA_CLIENTES]: 'pastas dos clientes', [AREA_BACKUP]: 'backups do CRM' };
 export const SUBPASTAS = [['01', 'Cadastro'], ['02', 'Diagnóstico'], ['03', 'Propostas e Contratos'], ['04', 'Estratégia'], ['05', 'Branding'], ['06', 'Conteúdo'],
   ['07', 'Projetos'], ['08', 'Aprovações'], ['09', 'Entregas'], ['10', 'Relatórios'], ['11', 'Reuniões'], ['12', 'Histórico']];
 const RAIZ = 'ROVYA — GESTÃO EMPRESARIAL';
@@ -160,7 +163,7 @@ export async function documentos() {
       <section class="card"><h3>Últimos arquivos</h3><ul class="lista">${docs.map(linhaDoc).join('') || '<li class="vazio">Nenhum arquivo ainda. Envie pela ficha do cliente, pela proposta ou pelo contrato.</li>'}</ul></section>
       <section class="card"><div style="display:flex;justify-content:space-between;align-items:center;gap:8px"><h3>Estrutura</h3><button class="bt peq ${editando ? '' : 'fantasma'}" id="editEstr">${editando ? 'Concluir' : 'Editar estrutura'}</button></div>
         <ul class="lista">${lista.map(a => `<li>${a.folder_id ? `<a class="cresce" href="${pastaLink(a.folder_id)}" target="_blank" rel="noopener">${esc(a.nome)}</a>` : `<span class="cresce mute">${esc(a.nome)}${raiz ? ' · ainda não criada no Drive' : ''}</span>`}${editando
-          ? (a.chave === AREA_CLIENTES ? '<small class="mute" title="As pastas dos clientes são criadas aqui">pastas dos clientes</small>' : `<button class="bt peq fantasma" data-tirar="${esc(a.chave)}" style="color:var(--bad)">Remover</button>`) : ''}</li>`).join('') || '<li class="vazio">Nenhuma área na estrutura.</li>'}</ul>
+          ? (AREAS_FIXAS[a.chave] ? `<small class="mute" title="O CRM usa esta pasta, então ela fica">${AREAS_FIXAS[a.chave]}</small>` : `<button class="bt peq fantasma" data-tirar="${esc(a.chave)}" style="color:var(--bad)">Remover</button>`) : ''}</li>`).join('') || '<li class="vazio">Nenhuma área na estrutura.</li>'}</ul>
         ${editando ? '<button class="bt peq sec" id="novaArea" style="margin-top:10px">+ Adicionar pasta</button>' : ''}</section>
     </div>`;
   $('#editEstr').onclick = () => { editando = !editando; documentos(); };

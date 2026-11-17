@@ -51,6 +51,8 @@ Qualquer hospedagem estática serve (GitHub Pages, como as figurinhas). Depois d
 
 `python -m http.server 8777 --directory crm` e abra http://localhost:8777/login.html.
 
+**Testes automáticos** (navegador de verdade, dados de mentira): `python testes/rodar.py` roda todos; `python testes/rodar.py offline` roda só os que têm "offline" no nome. Precisa de `pip install playwright`, Google Chrome instalado e `supabase/002_seed.sql` no computador (fica fora do git). O `testes/mock.py` gera `_mock.html`, que finge o Supabase (`window.__D`), registra cada chamada (`window.__log`) e finge o Google Agenda, inclusive sem internet. Rode antes de publicar qualquer mudança. `teste_sessao_vencida_real.py` é o único que fala com o Supabase de verdade (só leitura, sem login).
+
 ## Assistente (IA) e notificações — falta a chave do Gemini
 
 A função `crm-assistente` usa o **Gemini pago** (`gemini-3.8-flash`). O nível grátis usa os dados para treinar, e aqui há dados de clientes. Enquanto não houver chave, o chat responde "falta GEMINI_API_KEY nos secrets".
@@ -66,7 +68,9 @@ O resumo diário sai pelo pg_cron `crm-resumo-diario` (10:30 UTC = 07:30 em Bras
 
 - **Verificação em duas etapas (MFA):** em Configurações → Ativar, com um app autenticador. Quem ativa só lê/escreve o CRM com o código: as políticas restritivas `crm_mfa` (`supabase/009_seguranca.sql`) exigem sessão `aal2` para quem tem fator verificado, e as Edge Functions conferem o mesmo. Perdeu o celular? No Supabase → Authentication → Users → a usuária → remover o fator MFA; ela entra só com a senha e ativa de novo.
 - **Registro de alterações:** a tabela `crm_log` recebe, por trigger, todo insert/update/delete nas tabelas `crm_*` (no update, só os campos que mudaram). O navegador só lê; ninguém edita ou apaga pelo CRM. Itens apagados podem ser restaurados em Configurações → Restaurar (restaure primeiro o “pai”, ex.: o cliente antes do projeto).
-- **Backup:** Configurações → Baixar backup ou Salvar no Drive (pasta 15 Tecnologia e Sistemas). Arquivo `ROVYA_BACKUP_AAAA-MM-DD.json` com `{tabelas: {crm_clientes: [...], ...}}`. Recomendado: um backup no Drive por semana.
+- **Backup:** Configurações → Baixar backup ou Salvar no Drive (pasta 15 Tecnologia e Sistemas). Arquivo `ROVYA_BACKUP_AAAA-MM-DD.json` com `{tabelas: {crm_clientes: [...], ...}}`.
+- **Backup automático** (`supabase/014_backup.sql`): toda segunda às 3h de Brasília o pg_cron `crm-backup-semanal` chama a função `crm-google` (header `x-cron`), que salva `ROVYA_BACKUP_AAAA-MM-DD_AUTO.json` (mesmo formato) na pasta 15 e manda os automáticos além dos 12 mais recentes para a lixeira do Drive. Se falhar (Google desconectado, pasta 15 ainda não criada), vira aviso no Início. As pastas 07 e 15 não podem ser removidas da estrutura, porque o CRM usa as duas.
+- **Erros da tela:** erro de código no navegador vai para `crm_falhas` com origem `tela` (no máximo 5 por visita, nada sem internet) e aparece em Configurações → Falhas, não no Início.
 - **Restaurar um backup** (num projeto vazio, depois de rodar os SQL 001…009 em ordem): para cada tabela, na ordem clientes → oportunidades → interacoes → servicos → propostas → contratos → projetos → etapas → entregas → anexos → tarefas → parcelas → modelos → documentos → drive, rode no SQL Editor:
   `insert into public.crm_clientes select * from jsonb_populate_recordset(null::public.crm_clientes, '<cole aqui o array crm_clientes do JSON>'::jsonb) on conflict do nothing;`
   Teste a restauração de vez em quando num projeto de teste: backup que nunca foi restaurado não é garantia.

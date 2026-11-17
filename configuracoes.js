@@ -1,6 +1,6 @@
 // Configurações: verificação em duas etapas (MFA), backup em formato aberto e registro de alterações.
 import { sb, $, main, esc, hoje, toast, q, formulario, confirma } from './util.js';
-import { garantirEstrutura, subir } from './drive.js';
+import { garantirEstrutura, subir, AREA_BACKUP } from './drive.js';
 
 // tabelas do backup (as de token/notificação ficam de fora: são segredo ou se refazem sozinhas)
 const TABELAS = ['crm_clientes', 'crm_oportunidades', 'crm_interacoes', 'crm_servicos', 'crm_propostas', 'crm_contratos', 'crm_projetos', 'crm_etapas',
@@ -25,10 +25,11 @@ export async function configuracoes(filtroLog = '') {
           <button class="bt" id="mfaAtivar">Ativar</button>`}</section>
       <section class="card"><h3>Cópia de segurança</h3>
         <p class="mute">Todos os dados do CRM em um arquivo JSON (formato aberto). Os arquivos em si já ficam no Drive e no Storage.</p>
+        <p class="mute">Automático: toda segunda às 3h o CRM salva um backup na pasta “15 — Tecnologia e Sistemas” do Drive e guarda os 12 mais recentes (os mais antigos vão para a lixeira do Drive). Se não conseguir, avisa no Início.</p>
         <div class="acoes"><button class="bt sec" id="bkBaixar">Baixar backup</button><button class="bt" id="bkDrive">Salvar no Drive (15 Tecnologia)</button></div></section>
     </div>
     <section class="card" style="margin-top:18px"><h3>Falhas de integração ${falhas.length ? `<span class="pill p-revisao">${falhas.length}</span>` : ''}</h3>
-      <p class="mute">Quando o Drive, o Google Agenda ou o Assistente falham, fica anotado aqui. Nada é refeito sozinho: confira e tente de novo pela própria tela.</p>
+      <p class="mute">Quando o Drive, o Google Agenda, o Assistente ou o backup falham, fica anotado aqui. Erros de código da tela (origem “tela”) também: anote e mande para quem mantém o CRM. Nada é refeito sozinho: confira e tente de novo pela própria tela.</p>
       <ul class="lista">${falhas.map(f => `<li><div class="cresce"><b>${esc(f.mensagem)}</b><small>${esc(f.origem)}${f.acao ? ' · ' + esc(f.acao) : ''} · ${new Date(f.quando).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</small></div><button class="bt peq sec" data-resolvida="${f.id}">Resolvida</button></li>`).join('') || '<li class="vazio">Nenhuma falha pendente.</li>'}</ul></section>
     <h2 style="margin:28px 0 12px">Registro de alterações</h2>
     <div class="acoes" style="margin-bottom:10px"><select class="busca" id="logFiltro" style="min-width:0"><option value="">Todas as áreas</option>${TABELAS.map(t => `<option value="${t}" ${t === filtroLog ? 'selected' : ''}>${NOMES[t]}</option>`).join('')}</select>
@@ -45,7 +46,7 @@ export async function configuracoes(filtroLog = '') {
   };
   $('#bkBaixar').onclick = async () => { const a = await gerarBackup(); baixar(a); };
   $('#bkDrive').onclick = async () => {
-    try { const ids = await garantirEstrutura(); const a = await gerarBackup(); const f = await subir(a, a.name, ids['15']);
+    try { const ids = await garantirEstrutura(); const a = await gerarBackup(); const f = await subir(a, a.name, ids[AREA_BACKUP]);
       toast('Backup salvo no Drive: ' + f.name); } catch (e) { toast(e.message, true); }
   };
   const porId = Object.fromEntries(logs.map(l => [String(l.id), l]));
