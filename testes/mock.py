@@ -12,12 +12,12 @@ etapas = [{'id': f'e{i}', 'ordem': i + 1, 'titulo': e['titulo'], 'orientacao': e
                              'prazo': '2026-11-1%d' % (j + 1) if i == 1 else None, 'texto': None, 'link': None,
                              'crm_anexos': [{'id': 'a'}] if i == 0 else []} for j, t in enumerate(e['entregas'])]}
           for i, e in enumerate(est)]
-cli = [{'id': 'c1', 'nome': 'João Guilherme', 'empresa': 'Conecta Imóveis 3D', 'email': 'joao@conecta.com', 'telefone': '(16) 99999-0000', 'instagram': '@conecta3d', 'origem': 'Indicação', 'notas': 'Prefere WhatsApp.', 'criado_em': '2026-10-27T10:00:00Z'},
+cli = [{'id': 'c1', 'nome': 'Paulo Mendes', 'empresa': 'Imobiliária Horizonte', 'email': 'paulo@horizonte.com', 'telefone': '(16) 99999-0000', 'instagram': '@horizonte', 'origem': 'Indicação', 'notas': 'Prefere WhatsApp.', 'criado_em': '2026-10-27T10:00:00Z'},
        {'id': 'c2', 'nome': 'Marina Lopes', 'empresa': 'Ateliê Marina', 'email': 'marina@atelie.com', 'telefone': '', 'instagram': '@ateliemarina', 'origem': 'Instagram', 'notas': None, 'criado_em': '2026-11-05T10:00:00Z'},
        {'id': 'c3', 'nome': 'Carla Dias', 'empresa': 'Clínica Dias', 'email': '', 'telefone': '', 'instagram': '', 'origem': 'Site', 'notas': None, 'criado_em': '2026-11-08T10:00:00Z'}]
 ops = [{'id': 'o1', 'cliente_id': 'c2', 'titulo': 'Posicionamento + identidade', 'etapa': 'proposta', 'valor': 4800, 'proximo_passo': 'Ligar para tirar dúvidas da proposta', 'proximo_em': '2026-11-11', 'crm_clientes': {'nome': 'Marina Lopes', 'empresa': 'Ateliê Marina'}, 'ordem': 1},
        {'id': 'o2', 'cliente_id': 'c3', 'titulo': 'Comunicação da clínica', 'etapa': 'diagnostico', 'valor': 3500, 'proximo_passo': 'Reunião de diagnóstico', 'proximo_em': '2026-11-14', 'crm_clientes': {'nome': 'Carla Dias', 'empresa': 'Clínica Dias'}, 'ordem': 2},
-       {'id': 'o3', 'cliente_id': 'c1', 'titulo': 'Gestão estratégica da comunicação', 'etapa': 'ganho', 'valor': 6000, 'proximo_passo': None, 'proximo_em': None, 'crm_clientes': {'nome': 'João Guilherme', 'empresa': 'Conecta Imóveis 3D'}, 'ordem': 3},
+       {'id': 'o3', 'cliente_id': 'c1', 'titulo': 'Gestão estratégica da comunicação', 'etapa': 'ganho', 'valor': 6000, 'proximo_passo': None, 'proximo_em': None, 'crm_clientes': {'nome': 'Paulo Mendes', 'empresa': 'Imobiliária Horizonte'}, 'ordem': 3},
        {'id': 'o4', 'cliente_id': 'c2', 'titulo': 'Kit de stickers', 'etapa': 'contato', 'valor': 900, 'proximo_passo': 'Mandar portfólio', 'proximo_em': '2026-11-13', 'crm_clientes': {'nome': 'Marina Lopes', 'empresa': 'Ateliê Marina'}, 'ordem': 4}]
 parc = [{'id': 'p1', 'descricao': '1/3', 'valor': 2000, 'vencimento': '2026-10-28', 'pago_em': '2026-10-28', 'forma': 'Pix'},
         {'id': 'p2', 'descricao': '2/3', 'valor': 2000, 'vencimento': '2026-11-10', 'pago_em': None, 'forma': 'Pix'},
@@ -26,7 +26,7 @@ proj = {'id': 'pr1', 'cliente_id': 'c1', 'nome': 'Gestão estratégica da comuni
 for p in parc: p['crm_projetos'] = {'id': 'pr1', 'nome': proj['nome']}
 # ---- dados extras (serviços, propostas, contratos, Drive, tarefas…) ----
 # dados extras da etapa 1 (serviços, propostas, contratos) — executado dentro do mock.py
-cli[0].update(codigo='R001', razao_social='Conecta Imóveis 3D Ltda', documento='12.345.678/0001-90')
+cli[0].update(codigo='R001', razao_social='Imobiliária Horizonte Ltda', documento='12.345.678/0001-90')
 serv = [{'id': 's1', 'codigo': 'SV01', 'nome': 'Gestão estratégica da comunicação', 'categoria': 'Estratégia', 'descricao': 'Diagnóstico, posicionamento e plano de comunicação', 'escopo': '6 etapas', 'entregaveis': 'Diagnóstico\nPlano editorial\nRevista', 'preco': 6000, 'ativo': True},
         {'id': 's2', 'codigo': 'SV02', 'nome': 'Identidade visual', 'categoria': 'Branding', 'descricao': 'Logo, paleta e manual', 'escopo': None, 'entregaveis': 'Logo\nManual', 'preco': 4200, 'ativo': True},
         {'id': 's3', 'codigo': 'SV03', 'nome': 'Kit de stickers', 'categoria': 'Produto', 'descricao': '12 figurinhas', 'escopo': None, 'entregaveis': None, 'preco': 900, 'ativo': False}]
@@ -41,13 +41,13 @@ modelo_prop = {'id': 'm3', 'tipo': 'proposta', 'titulo': 'Proposta padrão', 'co
 cli[0].update(drive_pasta='PASTA_R001', drive_subpastas={'01': 'a', '03': 'b'})
 for c in cli[1:]: c.update(drive_pasta=None, drive_subpastas={})
 drive = [{'chave': 'raiz', 'folder_id': 'RAIZ', 'nome': 'ROVYA — GESTÃO EMPRESARIAL'}] + [{'chave': '%02d' % i, 'folder_id': 'A%02d' % i, 'nome': 'x'} for i in range(18)]
-docs = [{'id': 'd1', 'drive_id': 'f1', 'nome': 'ROVYA_R001_PROPOSTA_2026-11-15_V01.pdf', 'link': 'https://drive.google.com/file/d/f1', 'tipo': 'PROPOSTA', 'subpasta': '03', 'versao': 1, 'classificacao': 'cliente', 'cliente_id': 'c1', 'proposta_id': 'pp1', 'contrato_id': None, 'criado_em': '2026-11-15T12:00:00Z', 'crm_clientes': {'nome': 'João Guilherme', 'empresa': 'Conecta Imóveis 3D'}},
-        {'id': 'd2', 'drive_id': 'f2', 'nome': 'ROVYA_R001_CONTRATO_2026-11-15_V01.pdf', 'link': 'https://drive.google.com/file/d/f2', 'tipo': 'CONTRATO', 'subpasta': '03', 'versao': 1, 'classificacao': 'confidencial', 'cliente_id': 'c1', 'proposta_id': None, 'contrato_id': 'k1', 'criado_em': '2026-11-15T12:00:00Z', 'crm_clientes': {'nome': 'João Guilherme', 'empresa': 'Conecta Imóveis 3D'}}]
+docs = [{'id': 'd1', 'drive_id': 'f1', 'nome': 'ROVYA_R001_PROPOSTA_2026-11-15_V01.pdf', 'link': 'https://drive.google.com/file/d/f1', 'tipo': 'PROPOSTA', 'subpasta': '03', 'versao': 1, 'classificacao': 'cliente', 'cliente_id': 'c1', 'proposta_id': 'pp1', 'contrato_id': None, 'criado_em': '2026-11-15T12:00:00Z', 'crm_clientes': {'nome': 'Paulo Mendes', 'empresa': 'Imobiliária Horizonte'}},
+        {'id': 'd2', 'drive_id': 'f2', 'nome': 'ROVYA_R001_CONTRATO_2026-11-15_V01.pdf', 'link': 'https://drive.google.com/file/d/f2', 'tipo': 'CONTRATO', 'subpasta': '03', 'versao': 1, 'classificacao': 'confidencial', 'cliente_id': 'c1', 'proposta_id': None, 'contrato_id': 'k1', 'criado_em': '2026-11-15T12:00:00Z', 'crm_clientes': {'nome': 'Paulo Mendes', 'empresa': 'Imobiliária Horizonte'}}]
 cli[0].update(cliente_desde='2026-10-27', onboarding=[{'item': 'Contrato assinado', 'feito': True}, {'item': 'Pasta no Drive criada', 'feito': True}, {'item': 'Briefing recebido', 'feito': False}],
               crm_interacoes=[{'id': 'h1', 'tipo': 'reuniao', 'data': '2026-11-10', 'resumo': 'Kickoff: alinhamos o cronograma da revista.', 'criado_em': '2026-11-10T10:00:00Z'},
                               {'id': 'h2', 'tipo': 'ligacao', 'data': '2026-10-20', 'resumo': 'Primeira conversa, veio por indicação.', 'criado_em': '2026-10-20T10:00:00Z'}])
 for c in cli[1:]: c.update(cliente_desde=None, onboarding=None, crm_interacoes=[])
-tarefas = [{'id': 't1', 'projeto_id': 'pr1', 'cliente_id': 'c1', 'titulo': 'Revisar textos da revista', 'descricao': None, 'prioridade': 'alta', 'prazo': '2026-11-14', 'status': 'a_fazer', 'link': 'https://drive.google.com', 'concluida_em': None, 'criado_em': '2026-11-10T10:00:00Z', 'crm_projetos': {'id': 'pr1', 'nome': 'Gestão estratégica da comunicação'}, 'crm_clientes': {'id': 'c1', 'nome': 'João Guilherme', 'empresa': 'Conecta Imóveis 3D'}},
+tarefas = [{'id': 't1', 'projeto_id': 'pr1', 'cliente_id': 'c1', 'titulo': 'Revisar textos da revista', 'descricao': None, 'prioridade': 'alta', 'prazo': '2026-11-14', 'status': 'a_fazer', 'link': 'https://drive.google.com', 'concluida_em': None, 'criado_em': '2026-11-10T10:00:00Z', 'crm_projetos': {'id': 'pr1', 'nome': 'Gestão estratégica da comunicação'}, 'crm_clientes': {'id': 'c1', 'nome': 'Paulo Mendes', 'empresa': 'Imobiliária Horizonte'}},
            {'id': 't2', 'projeto_id': None, 'cliente_id': None, 'titulo': 'Renovar assinatura do Canva', 'descricao': None, 'prioridade': 'media', 'prazo': '2026-11-18', 'status': 'fazendo', 'link': None, 'concluida_em': None, 'criado_em': '2026-11-10T10:00:00Z', 'crm_projetos': None, 'crm_clientes': None},
            {'id': 't3', 'projeto_id': None, 'cliente_id': None, 'titulo': 'Organizar portfólio', 'descricao': None, 'prioridade': 'baixa', 'prazo': None, 'status': 'feita', 'link': None, 'concluida_em': '2026-11-12', 'criado_em': '2026-11-01T10:00:00Z', 'crm_projetos': None, 'crm_clientes': None}]
 for x in parc: x.update(tipo='receita', categoria='Projeto', cliente_id='c1', contrato_id='k1')
@@ -65,13 +65,13 @@ FM=['Post feed','Carrossel','Reels / vídeo',None]
 for e in etapas:
     for j,x in enumerate(e['crm_entregas']):
         x.update(formato=FM[j%4], revisoes=(2 if x['status']=='revisao' else 0), aprovado_em=('2026-11-10T12:00:00Z' if x['status']=='aprovado' else None))
-pinfo={'id':'pr1','nome':proj['nome'],'status':'ativo','crm_clientes':{'id':'c1','nome':'João Guilherme','empresa':'Conecta Imóveis 3D'}}
+pinfo={'id':'pr1','nome':proj['nome'],'status':'ativo','crm_clientes':{'id':'c1','nome':'Paulo Mendes','empresa':'Imobiliária Horizonte'}}
 ents = [{**x, 'crm_etapas': {'titulo': e['titulo'], 'projeto_id': 'pr1', 'crm_projetos': pinfo}} for e in etapas for x in e['crm_entregas']]
 D = {'crm_clientes': [{**c, 'crm_projetos': [{'id': 'pr1', 'nome': proj['nome'], 'status': 'ativo', 'valor': 6000}] if c['id'] == 'c1' else [], 'crm_oportunidades': [o for o in ops if o['cliente_id'] == c['id']]} for c in cli],
      'crm_oportunidades': ops, 'crm_projetos': [proj], 'crm_entregas': ents, 'crm_parcelas': parc,
      'crm_servicos': serv, 'crm_propostas': props, 'crm_contratos': contr, 'crm_drive': drive, 'crm_documentos': docs, 'crm_tarefas': tarefas, 'crm_log': logs, 'crm_falhas': [{'id':1,'quando':'2026-11-16T11:00:00Z','origem':'drive','acao':'POST /upload/drive/v3/files','mensagem':'Drive: Insufficient Permission','resolvida':False}], 'crm_interacoes': cli[0]['crm_interacoes'],
      'crm_anexos': [{'id': 'a', 'nome': 'Revista.pdf', 'caminho': 'x', 'tamanho': 5200000}],
-     'crm_modelos': [{'id': 'm1', 'tipo': 'projeto', 'titulo': 'Gestão estratégica da comunicação', 'corpo': 'Estrutura completa usada no projeto Conecta Imóveis 3D (out/2026): 6 etapas.', 'estrutura': est},
+     'crm_modelos': [{'id': 'm1', 'tipo': 'projeto', 'titulo': 'Gestão estratégica da comunicação', 'corpo': 'Estrutura completa usada no projeto Imobiliária Horizonte (out/2026): 6 etapas.', 'estrutura': est},
                      modelo_prop, {'id': 'm2', 'tipo': 'whatsapp', 'titulo': 'Primeiro contato', 'corpo': 'Oi, {{contato}}! Aqui é a Sabrina, da Rovya. Vi o trabalho da {{empresa}} e…'}]}
 EV = {'conectado': True, 'email': 'rovyacreative@gmail.com', 'eventos': [
     {'id': 'g1', 'summary': 'Reunião de diagnóstico · Clínica Dias', 'start': {'dateTime': '2026-11-12T14:00:00-03:00'}, 'end': {'dateTime': '2026-11-12T15:00:00-03:00'}, 'extendedProperties': {'private': {'crm_cliente': 'c3'}}},
