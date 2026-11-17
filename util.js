@@ -17,7 +17,7 @@ export function toast(msg, erro) {
 }
 // anexos ficam no Storage do Supabase (1 GB no plano grátis, dividido com o rovya-stickers); arquivo grande vai para o Drive.
 // O mesmo limite está no bucket (supabase/012_limite_anexos.sql), que recusa mesmo se a tela for contornada.
-export const LIMITE_ANEXO_MB = 10;
+export const LIMITE_ANEXO_MB = 50;
 export function anexosGrandes(arquivos) {
   const grandes = [...arquivos].filter(f => f.size > LIMITE_ANEXO_MB * 1048576);
   if (grandes.length) toast(`${grandes.map(f => `“${f.name}” tem ${Math.ceil(f.size / 1048576)} MB`).join(', ')}: o limite é ${LIMITE_ANEXO_MB} MB. Arquivos grandes vão pelo Drive (ficha do cliente → Enviar ao Drive).`, true);
