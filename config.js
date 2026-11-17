@@ -14,4 +14,4 @@ const armazenamento = {
   setItem: (k, v) => localStorage.setItem(k, v),
   removeItem: k => localStorage.removeItem(k),
 };
-export const sb = createClient(SUPABASE_URL, 'sb_publishable_Y7tQfUBPShG6MIeAEChc5Q_3k2wOB0W', { auth: { storage: armazenamento } });
+export const sb = createClient(SUPABASE_URL, 'sb_publishable_Y7tQfUBPShG6MIeAEChc5Q_3k2wOB0W', { auth: { storage: armazenamento, autoRefreshToken: !new URLSearchParams(location.search).has('copia') } });

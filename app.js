@@ -32,6 +32,9 @@ $('#sair').onclick = async () => {
   location.replace('login.html');
 };
 
+// ?copia=1: este é o quadro invisível da cópia completa (só abre telas para o sw.js guardar; ver copiaCompleta)
+const COPIA_MODO = new URLSearchParams(location.search).has('copia');
+
 /* ---------- roteador ---------- */
 const rotas = { '': inicio, funil, clientes, cliente, projetos, projeto, producao: () => producao(abrirEntrega), financeiro, agenda, modelos, assistente, servicos, propostas, proposta, contratos, contrato, documentos, tarefas, configuracoes, relatorios };
 async function rotear() {
@@ -43,7 +46,7 @@ async function rotear() {
     console.error(e);
     main.innerHTML = `<p class="vazio">${semRede(e) ? 'Sem internet, e esta tela ainda não tinha sido aberta neste aparelho, então não há cópia salva dela.' : 'Não consegui carregar: ' + esc(e.message)}</p>`;
   }
-  main.focus({ preventScroll: true });
+  if (!COPIA_MODO) main.focus({ preventScroll: true }); // o quadro da cópia não pode roubar o cursor de quem está digitando
 }
 addEventListener('hashchange', rotear);
 
@@ -613,18 +616,52 @@ async function avisoNotificacoes() {
     } catch (e) { toast('Não consegui ativar: ' + e.message, true); }
   };
 }
-if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('sw.js').catch(() => { });
-  // deixa salvo tudo o que esta tela baixou (scripts, estilos, fontes) e o login, para abrir sem internet
-  navigator.serviceWorker.ready.then(r => r.active?.postMessage({ guardar: ['login.html', 'app.html', ...performance.getEntriesByType('resource').map(x => x.name)] })).catch(() => { });
+/* ---------- cópia completa no aparelho ----------
+   A cada 30 min (com o CRM aberto e internet), abre cada tela e cada ficha num quadro invisível;
+   o sw.js guarda as respostas, então sem internet tudo abre com a versão mais nova, mesmo o que ela não abriu.
+   Com o CRM fechado o navegador não deixa rodar: a cópia se atualiza na próxima vez que ela abrir. */
+const COPIA = 'rovya-copia-em';
+const ultimaCopia = () => { try { return +localStorage.getItem(COPIA) || 0; } catch { return 0; } };
+const marcarCopia = () => { const t = ultimaCopia(); if (t) main.dataset.copia = ' Cópia completa de ' + new Date(t).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) + '.'; };
+function copiaCompleta() {
+  if (!navigator.onLine || !navigator.serviceWorker?.controller || Date.now() - ultimaCopia() < 29 * 6e4) return;
+  return navigator.locks ? navigator.locks.request('rovya-copia', { ifAvailable: true }, l => l && copiar()) : copiar();
+}
+async function copiar() {
+  const fichas = async (t, rota, filtro = s => s) => ((await filtro(sb.from(t).select('id'))).data || []).map(x => `${rota}/${x.id}`);
+  const rotas = ['funil', 'propostas', 'contratos', 'clientes', 'projetos', 'producao', 'tarefas', 'agenda', 'financeiro', 'relatorios', 'documentos', 'servicos', 'modelos', 'configuracoes',
+    ...await fichas('crm_clientes', 'cliente'), ...await fichas('crm_projetos', 'projeto', s => s.neq('status', 'arquivado')),
+    ...await fichas('crm_contratos', 'contrato'), ...await fichas('crm_propostas', 'proposta')]; // Assistente fica de fora: abrir pede o resumo à IA
+  const f = Object.assign(document.createElement('iframe'), { src: location.pathname.split('/').pop() + '?copia=1', hidden: true, title: 'cópia' });
+  document.body.append(f);
+  try {
+    await new Promise((ok, erro) => { const t0 = Date.now(), ver = () => f.contentWindow?.copiaPronta ? ok() : Date.now() - t0 > 30000 ? erro(new Error('o quadro não abriu')) : setTimeout(ver, 200); ver(); });
+    await f.contentWindow.copiaPronta; // Início
+    for (const r of rotas) {
+      if (!navigator.onLine) return; // caiu no meio: não marca como completa
+      await f.contentWindow.irPara(r); await new Promise(ok => setTimeout(ok, 300)); // 300 ms: chamadas que a tela dispara sem esperar (agenda do dia)
+    }
+    try { localStorage.setItem(COPIA, Date.now()); } catch { }
+    marcarCopia();
+  } catch (e) { console.warn('cópia completa:', e.message); } finally { f.remove(); }
 }
 
-/* ---------- sem internet ---------- */
-const faixaRede = () => document.body.classList.toggle('sem-rede', !navigator.onLine);
-addEventListener('offline', faixaRede);
-addEventListener('online', () => { faixaRede(); enviarPendentes(); if (!$('#dlg').open) rotear(); }); // voltou: atualiza a tela com os dados novos
-faixaRede();
-setTimeout(enviarPendentes, 3000);
-setInterval(enviarPendentes, 120000); // o evento "online" falha em alguns celulares
-
-rotear();
+if (COPIA_MODO) {
+  window.irPara = r => { history.replaceState(null, '', '#/' + r); return rotear(); };
+  window.copiaPronta = rotear();
+} else {
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('sw.js').catch(() => { });
+    // deixa salvo tudo o que esta tela baixou (scripts, estilos, fontes) e o login, para abrir sem internet
+    navigator.serviceWorker.ready.then(r => r.active?.postMessage({ guardar: ['login.html', 'app.html', ...performance.getEntriesByType('resource').map(x => x.name)] })).catch(() => { });
+  }
+  /* ---------- sem internet ---------- */
+  const faixaRede = () => document.body.classList.toggle('sem-rede', !navigator.onLine);
+  addEventListener('offline', faixaRede);
+  addEventListener('online', () => { faixaRede(); enviarPendentes(); copiaCompleta(); if (!$('#dlg').open) rotear(); }); // voltou: atualiza a tela com os dados novos
+  faixaRede(); marcarCopia();
+  setTimeout(enviarPendentes, 3000);
+  setTimeout(copiaCompleta, 10000); // depois da primeira tela, para não disputar com ela
+  setInterval(() => { enviarPendentes(); copiaCompleta(); }, 120000); // o evento "online" falha em alguns celulares
+  rotear();
+}
