@@ -159,6 +159,8 @@ function modoNovaSenha(){
   $('senha').value=''; $('senha').autocomplete='new-password'; $('senha').closest('label').firstChild.textContent='Nova senha';
   $('b').textContent='Salvar e entrar'; $('senha').focus();
 }
+// sem internet e com login guardado neste aparelho: vai direto para o CRM (abre com os dados salvos)
+try{ if(!navigator.onLine && Object.keys(localStorage).some(k=>/^sb-.+-auth-token$/.test(k))) location.replace('app.html'); }catch(e){}
 sb.auth.onAuthStateChange(ev=>{ if(ev==='PASSWORD_RECOVERY') modoNovaSenha(); });
 const { data:{ session } } = await sb.auth.getSession();
 if(window.veioRecuperar){

@@ -1,4 +1,4 @@
-import { sb, $, main, esc, brl, diaLocal, hoje, dataBR, venceu, toast, q, rotulo, preencher, mdHtml, mdTexto, formulario, confirma, listaClientes, opcoesClientes, funcao, baixarCsv } from './util.js';
+import { sb, $, main, esc, brl, diaLocal, hoje, dataBR, venceu, toast, q, rotulo, preencher, mdHtml, mdTexto, formulario, confirma, listaClientes, opcoesClientes, funcao, baixarCsv, semRede, sessaoSalva, registrarFalha } from './util.js';
 import { producao, STATUS_ENT, FORMATOS, seloPeca } from './producao.js';
 import { servicos, propostas, proposta, novaProposta, propostasDoCliente } from './comercial.js';
 import { contratos, contrato, novoContrato, alertasContratos, contratosDoCliente } from './contratos.js';
@@ -17,10 +17,20 @@ const RETENCAO = [['5_anos', 'Guardar 5 anos (padrão fiscal/contratual)'], ['2_
 const TIPOS_MODELO = [['orientacao', 'Orientação de etapa'], ['email', 'E-mail'], ['whatsapp', 'WhatsApp'], ['proposta', 'Proposta'], ['contrato', 'Contrato'], ['termo', 'Termo'], ['outro', 'Outro']];
 
 /* ---------- autenticação ---------- */
-const { data: { session } } = await sb.auth.getSession();
-if (!session) location.replace('login.html');
-else { const { data: n } = await sb.auth.mfa.getAuthenticatorAssuranceLevel(); if (n?.nextLevel === 'aal2' && n.currentLevel !== 'aal2') location.replace('login.html'); } // falta o código do MFA
-$('#sair').onclick = async () => { await sb.auth.signOut(); location.replace('login.html'); };
+// sem internet e com login guardado neste aparelho: abre com os dados salvos (o login é conferido quando a rede voltar)
+if (!(navigator.onLine === false && sessaoSalva())) {
+  const { data: { session } } = await sb.auth.getSession();
+  if (!session) location.replace('login.html');
+  else { const { data: n } = await sb.auth.mfa.getAuthenticatorAssuranceLevel(); if (n?.nextLevel === 'aal2' && n.currentLevel !== 'aal2') location.replace('login.html'); } // falta o código do MFA
+}
+$('#sair').onclick = async () => {
+  const n = lerFila().length;
+  if (n && !await confirma(`${n} compromisso(s) ainda não foram para o Google. Sair apaga isso deste aparelho. Sair mesmo assim?`)) return;
+  await sb.auth.signOut().catch(() => { });
+  try { localStorage.removeItem(FILA); } catch { }
+  await window.caches?.delete('rovya-v1').catch(() => { }); // cópia dos dados (sw.js) não fica no aparelho depois de sair
+  location.replace('login.html');
+};
 
 /* ---------- roteador ---------- */
 const rotas = { '': inicio, funil, clientes, cliente, projetos, projeto, producao: () => producao(abrirEntrega), financeiro, agenda, modelos, assistente, servicos, propostas, proposta, contratos, contrato, documentos, tarefas, configuracoes, relatorios };
@@ -29,7 +39,10 @@ async function rotear() {
   const fn = rotas[r] || inicio;
   document.querySelectorAll('#nav a').forEach(a => a.classList.toggle('on', a.dataset.r === (r || 'inicio') || (a.dataset.r + 's') === r || (r === 'cliente' && a.dataset.r === 'clientes') || (r === 'projeto' && a.dataset.r === 'projetos') || (r === 'proposta' && a.dataset.r === 'propostas') || (r === 'contrato' && a.dataset.r === 'contratos')));
   main.innerHTML = '<p class="vazio">Carregando…</p>';
-  try { await fn(id); } catch (e) { console.error(e); main.innerHTML = `<p class="vazio">Não consegui carregar: ${esc(e.message)}</p>`; }
+  try { await fn(id); } catch (e) {
+    console.error(e);
+    main.innerHTML = `<p class="vazio">${semRede(e) ? 'Sem internet, e esta tela ainda não tinha sido aberta neste aparelho, então não há cópia salva dela.' : 'Não consegui carregar: ' + esc(e.message)}</p>`;
+  }
   main.focus({ preventScroll: true });
 }
 addEventListener('hashchange', rotear);
@@ -50,19 +63,23 @@ async function novoCliente() {
 /* ---------- INÍCIO ---------- */
 async function inicio() {
   const em7 = diaLocal(7);
-  const [ops, ents, parc, projs, alertas, tars] = await Promise.all([
+  const [ops, ents, parc, projs, alertas, tars, falhas] = await Promise.all([
     q(sb.from('crm_oportunidades').select('id,titulo,proximo_passo,proximo_em,etapa,crm_clientes(nome)').not('etapa', 'in', '(ganho,perdido)').not('proximo_em', 'is', null).lte('proximo_em', em7).order('proximo_em')),
     q(sb.from('crm_entregas').select('id,titulo,prazo,status,crm_etapas!inner(projeto_id,crm_projetos!inner(nome,status))').neq('status', 'aprovado').eq('crm_etapas.crm_projetos.status', 'ativo').not('prazo', 'is', null).lte('prazo', em7).order('prazo')),
     q(sb.from('crm_parcelas').select('id,descricao,valor,vencimento,crm_projetos(nome)').eq('tipo', 'receita').is('pago_em', null).lte('vencimento', em7).order('vencimento')),
     q(sb.from('crm_projetos').select('id,nome,crm_clientes(nome),crm_etapas(crm_entregas(status))').eq('status', 'ativo').order('criado_em', { ascending: false })),
     alertasContratos(),
     tarefasDaSemana(),
+    sb.from('crm_falhas').select('id,mensagem').eq('resolvida', false).order('quando', { ascending: false }).limit(5).then(r => r.data || [], () => []),
   ]);
+  const nFila = lerFila().length;
+  const avisos = [...falhas.map(f => esc(f.mensagem)), ...(nFila ? [`${nFila} compromisso(s) guardado(s) neste aparelho, esperando internet para ir ao Google.`] : [])];
   const h = new Date().getHours(), saud = h < 12 ? 'Bom dia' : h < 18 ? 'Boa tarde' : 'Boa noite';
   const progresso = p => { const es = p.crm_etapas.flatMap(e => e.crm_entregas); return es.length ? Math.round(100 * es.filter(e => e.status === 'aprovado').length / es.length) : 0; };
   main.innerHTML = `
   <div class="topo"><div><div class="eyebrow">${new Date().toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' })}</div><h1>${saud}, Sabrina</h1></div>
     <div class="acoes"><button class="bt sec" id="nOp">+ Oportunidade</button><button class="bt" id="nCli">+ Cliente</button></div></div>
+  ${avisos.length ? `<section class="card avisos"><h3>Avisos</h3><ul class="lista">${avisos.map(a => `<li>⚠ ${a}</li>`).join('')}</ul>${falhas.length ? '<p><a href="#/configuracoes" class="mute">Ver e marcar como resolvidos →</a></p>' : ''}</section>` : ''}
   <div class="grade2">
     <section class="card"><h3>Próximos passos</h3><ul class="lista">${ops.map(o => `<li><div class="cresce"><b>${esc(o.proximo_passo || o.titulo)}</b><small>${esc(o.crm_clientes?.nome)} · ${esc(rotulo(ETAPAS_FUNIL, o.etapa))}</small></div><span class="${venceu(o.proximo_em) ? 'atrasado' : 'mute'}">${dataBR(o.proximo_em)}</span></li>`).join('') || '<li class="vazio">Nada para esta semana.</li>'}</ul><p><a href="#/funil" class="mute">Ver funil →</a></p></section>
     <section class="card"><h3>Entregas com prazo</h3><ul class="lista">${ents.map(e => `<li><div class="cresce"><b>${esc(e.titulo)}</b><small>${esc(e.crm_etapas.crm_projetos.nome)}</small></div><span class="pill p-${e.status}">${rotulo(STATUS_ENT, e.status)}</span><span class="${venceu(e.prazo) ? 'atrasado' : 'mute'}">${dataBR(e.prazo)}</span></li>`).join('') || '<li class="vazio">Nenhum prazo nos próximos 7 dias.</li>'}</ul></section>
@@ -217,7 +234,7 @@ async function cliente(id) {
   };
   $('#nOp').onclick = async () => { if (await novaOportunidade(id)) cliente(id); };
   $('#nProj').onclick = async () => { await criarProjeto(id, c.empresa || c.nome); };
-  $('#agendar').onclick = () => novoEvento({ cliente_id: id, titulo: 'Reunião · ' + (c.empresa || c.nome) }).then(ok => ok && toast('Reunião agendada no Google Agenda'));
+  $('#agendar').onclick = () => novoEvento({ cliente_id: id, titulo: 'Reunião · ' + (c.empresa || c.nome) });
   main.querySelectorAll('[data-op]').forEach(li => li.onclick = async () => { await editarOportunidade(c.crm_oportunidades.find(o => o.id === li.dataset.op)); cliente(id); });
 }
 
@@ -415,50 +432,120 @@ document.addEventListener('click', e => { if (e.target.id === 'copiar') { naviga
 /* ---------- AGENDA (Google, pela Edge Function crm-google) ---------- */
 const google = (acao, dados) => funcao('crm-google', acao, dados);
 const horaEv = e => e.start?.dateTime ? new Date(e.start.dateTime).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : 'dia todo';
+
+/* compromisso criado sem internet fica guardado neste aparelho e vai para o Google quando a conexão voltar.
+   Se ao enviar o horário já estiver ocupado no Google, ele é criado mesmo assim (nada se perde) e vira um aviso para a Sabrina. */
+const FILA = 'rovya-agenda-pendentes';
+const lerFila = () => { try { return JSON.parse(localStorage.getItem(FILA)) || []; } catch { return []; } };
+const gravarFila = f => localStorage.setItem(FILA, JSON.stringify(f)); // pode lançar (aparelho sem espaço): quem chama avisa
+const idEvento = () => 'crm' + Date.now().toString(32) + Math.random().toString(32).slice(2, 8); // formato que o Google aceita; reenviar não duplica
+const quandoEv = ev => new Date(ev.start.dateTime).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+function guardarPendente(evento) {
+  try { gravarFila([...lerFila().filter(p => p.evento.id !== evento.id), { evento, guardado_em: new Date().toISOString() }]); }
+  catch { toast('Não consegui guardar neste aparelho (sem espaço?). Anote o compromisso e tente de novo.', true); return false; }
+  toast('Sem internet: guardado neste aparelho. Vai para o Google quando a conexão voltar.'); return true;
+}
+function enviarPendentes() {
+  if (!navigator.onLine || !lerFila().length) return;
+  // uma aba por vez (duas abas abertas não enviam o mesmo compromisso)
+  return navigator.locks ? navigator.locks.request('rovya-agenda', { ifAvailable: true }, l => l && enviarFila()) : enviarFila();
+}
+async function enviarFila() {
+  let enviados = 0, conflitos = 0;
+  const marcar = (id, erro) => { try { gravarFila(lerFila().map(p => p.evento.id === id ? { ...p, erro } : p)); } catch { } };
+  for (const { evento, erro: erroAntes } of lerFila()) {
+    let r;
+    try { r = await google('listar', { de: evento.start.dateTime, ate: evento.end.dateTime, fresco: true }); }
+    catch (e) { if (semRede(e)) break; marcar(evento.id, e.message); continue; }
+    if (r.conectado === false) {
+      const m = 'Google Agenda não conectado';
+      if (erroAntes !== m) registrarFalha('agenda', 'compromisso guardado', `“${evento.summary}” (${quandoEv(evento)}) está guardado no aparelho, mas o Google Agenda não está conectado. Conecte em Agenda para enviar.`);
+      marcar(evento.id, m); continue;
+    }
+    if (!r.eventos.some(e => e.id === evento.id)) { // já criado numa tentativa que perdeu a resposta? então não cria de novo
+      try { await google('criar', { evento }); }
+      catch (e) { if (semRede(e)) break; if (!/already exists/i.test(e.message)) { marcar(evento.id, e.message); continue; } }
+    }
+    const choque = r.eventos.filter(e => e.id !== evento.id && e.start?.dateTime && e.status !== 'cancelled' && e.transparency !== 'transparent');
+    if (choque.length) {
+      conflitos++;
+      registrarFalha('agenda', 'conflito de horário', `“${evento.summary}” (${quandoEv(evento)}) foi marcado sem internet e ficou no mesmo horário de ${choque.map(e => '“' + (e.summary || 'sem título') + '” (' + horaEv(e) + ')').join(', ')}. Confira na Agenda.`);
+    }
+    try { gravarFila(lerFila().filter(p => p.evento.id !== evento.id)); } catch { }
+    enviados++;
+  }
+  if (!enviados) return;
+  toast(`${enviados} compromisso(s) marcado(s) sem internet foram para o Google${conflitos ? ` · ${conflitos} com conflito de horário: veja o aviso no Início` : ''}`, conflitos > 0);
+  if (!$('#dlg').open && /^(#\/?)?(agenda)?$/.test(location.hash)) rotear();
+}
+
 async function novoEvento(val = {}, ev = null) {
-  const cs = await listaClientes();
+  const cs = await listaClientes().catch(() => []);
   const v = await formulario(ev ? 'Editar compromisso' : 'Novo compromisso', [
     { k: 'titulo', l: 'Título', req: true }, { k: 'cliente_id', l: 'Cliente (opcional)', t: 'select', o: [['', '—'], ...opcoesClientes(cs)] },
     { k: 'data', l: 'Data', t: 'date', req: true, meia: true }, { k: 'hora', l: 'Início', t: 'time', req: true, meia: true },
     { k: 'duracao', l: 'Duração (min)', t: 'number', meia: true }, { k: 'local', l: 'Local ou link', meia: true }, { k: 'notas', l: 'Notas', t: 'textarea', linhas: 3 }],
     { data: hoje(), hora: '10:00', duracao: 60, ...val }, ev ? '<button class="bt fantasma" value="apagar" formnovalidate style="justify-self:start;color:var(--bad)">Apagar compromisso</button>' : '');
-  if ($('#dlg').returnValue === 'apagar') { if (await confirma('Apagar do Google Agenda também?')) { await google('apagar', { id: ev.id }); toast('Apagado'); return true; } return false; }
+  if ($('#dlg').returnValue === 'apagar') {
+    if (ev.pendente) {
+      if (!await confirma('Apagar este compromisso que ainda não foi para o Google?')) return false;
+      try { gravarFila(lerFila().filter(p => p.evento.id !== ev.id)); } catch { }
+      toast('Apagado'); return true;
+    }
+    if (await confirma('Apagar do Google Agenda também?')) {
+      try { await google('apagar', { id: ev.id }); } catch (e) { toast(semRede(e) ? 'Sem internet: apagar um compromisso que já está no Google precisa de conexão.' : e.message, true); return false; }
+      toast('Apagado'); return true;
+    }
+    return false;
+  }
   if (!v) return false;
   const ini = new Date(`${v.data}T${v.hora}`), fim = new Date(ini.getTime() + (v.duracao || 60) * 6e4);
   const evento = { summary: v.titulo, location: v.local || undefined, description: v.notas || undefined, start: { dateTime: ini.toISOString() }, end: { dateTime: fim.toISOString() },
     extendedProperties: { private: { crm_cliente: v.cliente_id || '' } } };
-  try { await google(ev ? 'editar' : 'criar', { id: ev?.id, evento }); } catch (e) { toast(e.message, true); return false; }
-  return true;
+  if (ev?.pendente) { const ok = guardarPendente({ ...evento, id: ev.id }); enviarPendentes(); return ok; }
+  if (!ev) evento.id = idEvento();
+  if (!ev && !navigator.onLine) return guardarPendente(evento);
+  try { await google(ev ? 'editar' : 'criar', { id: ev?.id, evento }); }
+  catch (e) {
+    if (!ev && semRede(e)) return guardarPendente(evento);
+    toast(semRede(e) ? 'Sem internet: alterar um compromisso que já está no Google precisa de conexão.' : e.message, true); return false;
+  }
+  toast(ev ? 'Compromisso atualizado' : 'Criado no Google Agenda'); return true;
 }
 async function agenda() {
   main.innerHTML = `<div class="topo"><div><div class="eyebrow">Google Agenda</div><h1>Agenda</h1><p id="agSub">Carregando…</p></div><div class="acoes" id="agAcoes"></div></div><div id="agLista"></div>`;
   const de = new Date(); de.setHours(0, 0, 0, 0); const ate = new Date(de.getTime() + 21 * 864e5);
+  const pend = lerFila().map(p => ({ ...p.evento, pendente: true, erro: p.erro }));
   let r; try { r = await google('listar', { de: de.toISOString(), ate: ate.toISOString() }); }
-  catch (e) { $('#agSub').textContent = e.message; return; }
+  catch (e) { r = { falhou: semRede(e) ? 'Sem internet e sem cópia salva da agenda. Os compromissos marcados neste aparelho aparecem abaixo.' : e.message, eventos: [] }; }
   if (r.conectado === false) {
     $('#agSub').textContent = 'Conecte a conta Google da Rovya para ver e criar compromissos daqui.';
     $('#agAcoes').innerHTML = '<button class="bt" id="con">Conectar Google Agenda</button>';
     $('#con').onclick = async () => { const { url } = await google('url', { volta: location.href.split('#')[0] + '#/agenda' }); location.href = url; };
-    return;
+    if (!pend.length) return;
+    r.eventos = [];
+  } else {
+    $('#agSub').textContent = r.falhou || (navigator.onLine ? `Conectada a ${r.email} · próximas 3 semanas` : 'Sem internet · agenda como estava na última vez que abriu com conexão');
+    $('#agAcoes').innerHTML = (r.falhou ? '' : '<button class="bt sec" id="desc">Desconectar</button>') + '<button class="bt" id="nEv">+ Compromisso</button>';
   }
-  const cs = Object.fromEntries((await listaClientes()).map(c => [c.id, c]));
-  $('#agSub').textContent = `Conectada a ${r.email} · próximas 3 semanas`;
-  $('#agAcoes').innerHTML = '<button class="bt sec" id="desc">Desconectar</button><button class="bt" id="nEv">+ Compromisso</button>';
-  const dias = {}; for (const e of r.eventos) { const d = (e.start.dateTime || e.start.date).slice(0, 10); (dias[d] ||= []).push(e); }
+  const cs = Object.fromEntries((await listaClientes().catch(() => [])).map(c => [c.id, c]));
+  const evs = [...r.eventos.filter(e => !pend.some(p => p.id === e.id)), ...pend]
+    .sort((a, b) => new Date(a.start.dateTime || a.start.date + 'T00:00') - new Date(b.start.dateTime || b.start.date + 'T00:00'));
+  const dias = {}; for (const e of evs) { const d = e.start.dateTime ? new Date(e.start.dateTime).toLocaleDateString('sv') : e.start.date; (dias[d] ||= []).push(e); }
   const dia = d => new Date(d + 'T12:00').toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' });
   $('#agLista').innerHTML = Object.entries(dias).map(([d, evs]) => `<section class="dia"><h3>${d === hoje() ? 'Hoje · ' : ''}${dia(d)}</h3>${evs.map(e => {
     const cid = e.extendedProperties?.private?.crm_cliente, c = cs[cid];
-    return `<div class="ev ${c ? 'crm' : ''}" data-ev="${e.id}"><span class="h">${horaEv(e)}</span><div><b>${esc(e.summary || '(sem título)')}</b>${c ? `<br><small class="mute">${esc(c.nome)}</small>` : ''}${e.location ? `<br><small class="mute">${esc(e.location)}</small>` : ''}</div></div>`;
+    return `<div class="ev ${c ? 'crm' : ''} ${e.pendente ? 'pendente' : ''}" data-ev="${esc(e.id)}"><span class="h">${horaEv(e)}</span><div><b>${esc(e.summary || '(sem título)')}</b>${c ? `<br><small class="mute">${esc(c.nome)}</small>` : ''}${e.location ? `<br><small class="mute">${esc(e.location)}</small>` : ''}${e.pendente ? `<br><small class="pend">${e.erro ? '⚠ Não enviado: ' + esc(e.erro) : '⏳ Guardado neste aparelho · vai para o Google quando a internet voltar'}</small>` : ''}</div></div>`;
   }).join('')}</section>`).join('') || '<p class="vazio">Nenhum compromisso nas próximas 3 semanas.</p>';
-  const porId = Object.fromEntries(r.eventos.map(e => [e.id, e]));
+  const porId = Object.fromEntries(evs.map(e => [e.id, e]));
   main.querySelectorAll('[data-ev]').forEach(el => el.onclick = async () => {
     const e = porId[el.dataset.ev]; if (!e.start.dateTime) { window.open(e.htmlLink, '_blank'); return; }
     const ini = new Date(e.start.dateTime), fim = new Date(e.end.dateTime);
     const ok = await novoEvento({ titulo: e.summary, cliente_id: e.extendedProperties?.private?.crm_cliente || '', data: ini.toLocaleDateString('sv'), hora: ini.toTimeString().slice(0, 5), duracao: Math.round((fim - ini) / 6e4), local: e.location, notas: e.description }, e);
     if (ok) agenda();
   });
-  $('#nEv').onclick = async () => { if (await novoEvento()) { toast('Criado no Google Agenda'); agenda(); } };
-  $('#desc').onclick = async () => { if (await confirma('Desconectar o Google Agenda?')) { await google('desconectar'); agenda(); } };
+  if ($('#nEv')) $('#nEv').onclick = async () => { if (await novoEvento()) agenda(); };
+  if ($('#desc')) $('#desc').onclick = async () => { if (await confirma('Desconectar o Google Agenda?')) { await google('desconectar'); agenda(); } };
 }
 
 /* ---------- ASSISTENTE (IA + notificações, pela Edge Function crm-assistente) ---------- */
@@ -526,6 +613,18 @@ async function avisoNotificacoes() {
     } catch (e) { toast('Não consegui ativar: ' + e.message, true); }
   };
 }
-if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => { });
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('sw.js').catch(() => { });
+  // deixa salvo tudo o que esta tela baixou (scripts, estilos, fontes) e o login, para abrir sem internet
+  navigator.serviceWorker.ready.then(r => r.active?.postMessage({ guardar: ['login.html', 'app.html', ...performance.getEntriesByType('resource').map(x => x.name)] })).catch(() => { });
+}
+
+/* ---------- sem internet ---------- */
+const faixaRede = () => document.body.classList.toggle('sem-rede', !navigator.onLine);
+addEventListener('offline', faixaRede);
+addEventListener('online', () => { faixaRede(); enviarPendentes(); if (!$('#dlg').open) rotear(); }); // voltou: atualiza a tela com os dados novos
+faixaRede();
+setTimeout(enviarPendentes, 3000);
+setInterval(enviarPendentes, 120000); // o evento "online" falha em alguns celulares
 
 rotear();

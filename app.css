@@ -129,7 +129,7 @@ dialog .dupla{display:grid;grid-template-columns:1fr 1fr;gap:12px}
 .anexos{display:grid;gap:6px}
 .anexos a{color:var(--wine)}
 
-#toast{position:fixed;left:50%;bottom:24px;transform:translate(-50%,20px);background:var(--side);color:#fff;padding:10px 18px;border-radius:999px;opacity:0;transition:.3s;z-index:60;pointer-events:none;max-width:90vw}
+#toast{position:fixed;left:50%;bottom:24px;transform:translate(-50%,20px);background:var(--side);color:#fff;padding:10px 18px;border-radius:14px;opacity:0;transition:.3s;z-index:60;pointer-events:none;width:max-content;max-width:min(560px,calc(100vw - 32px));text-align:center}
 #toast.on{opacity:1;transform:translate(-50%,0)}
 #toast.erro{background:var(--bad)}
 
@@ -164,3 +164,10 @@ dialog .dupla{display:grid;grid-template-columns:1fr 1fr;gap:12px}
 .enviar textarea:focus{outline:2px solid #b08a4a66;border-color:var(--gold)}
 .sugestoes{display:flex;gap:6px;flex-wrap:wrap}
 @media (max-width:760px){.msgs{max-height:none;min-height:50vh}.msg{max-width:90%}}
+/* sem internet: faixa no rodapé, compromissos guardados no aparelho e avisos no Início */
+body.sem-rede #main::before{content:"Sem internet · mostrando os dados salvos neste aparelho. Compromissos novos vão para o Google quando a conexão voltar.";display:block;margin-bottom:16px;padding:9px 14px;border-radius:8px;background:var(--wine2);color:#fff;font:500 .8rem/1.4 Inter}
+.ev.pendente{border-style:dashed;border-color:var(--warn)}
+.ev .pend{color:var(--warn);font-weight:500}
+.avisos{border-color:var(--warn);background:#b7791f0d;margin-bottom:18px}
+.avisos li{font-size:.92rem}
+@media (max-width:760px){#toast{bottom:calc(78px + env(safe-area-inset-bottom))}}

@@ -15,7 +15,19 @@ export function toast(msg, erro) {
   const t = $('#toast'); t.textContent = msg; t.className = 'on' + (erro ? ' erro' : '');
   clearTimeout(toast.t); toast.t = setTimeout(() => t.className = '', 3200);
 }
-export async function q(p) { const { data, error } = await p; if (error) { toast(error.message, true); throw error; } return data; }
+// falha de conexão (e não erro do servidor)
+export const semRede = e => !navigator.onLine || /Failed to fetch|NetworkError|Load failed|network/i.test(e?.message || '');
+// há login guardado neste aparelho? (permite abrir o CRM sem internet)
+export const sessaoSalva = () => { try { return !!localStorage.getItem(`sb-${new URL(SUPABASE_URL).hostname.split('.')[0]}-auth-token`); } catch { return false; } };
+export async function q(p) {
+  const { data, error } = await p;
+  if (error) {
+    const escrita = p?.method && !['GET', 'HEAD'].includes(p.method);
+    toast(semRede(error) ? (escrita ? 'Sem internet: isso não foi salvo. Tente de novo quando a conexão voltar.' : 'Sem internet e sem cópia salva desta informação.') : error.message, true);
+    throw error;
+  }
+  return data;
+}
 
 export const rotulo = (lista, v) => (lista.find(x => x[0] === v) || [, v])[1];
 
@@ -65,7 +77,7 @@ export const opcoesClientes = cs => cs.map(c => [c.id, (c.codigo ? c.codigo + ' 
 // chama uma Edge Function do Supabase com o login atual
 export async function funcao(nome, acao, dados = {}) {
   const { data: { session } } = await sb.auth.getSession();
-  const r = await fetch(`${SUPABASE_URL}/functions/v1/${nome}`, { method: 'POST', headers: { Authorization: 'Bearer ' + session.access_token, 'Content-Type': 'application/json' }, body: JSON.stringify({ acao, ...dados }) });
+  const r = await fetch(`${SUPABASE_URL}/functions/v1/${nome}`, { method: 'POST', headers: { Authorization: 'Bearer ' + session?.access_token, 'Content-Type': 'application/json' }, body: JSON.stringify({ acao, ...dados }) });
   const j = await r.json().catch(() => ({})); if (!r.ok) { const m = j.erro || 'Falha (' + r.status + ')'; registrarFalha(nome, acao, m); throw new Error(m); } return j;
 }
 // guarda a falha de integração para a Sabrina ver em Configurações (nunca quebra a tela se o registro falhar)

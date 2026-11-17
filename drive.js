@@ -1,12 +1,9 @@
 // Google Drive: estrutura da ROVYA, pasta de cada cliente e envio de arquivos.
 // Escopo drive.file: o CRM só enxerga o que ele mesmo criou. Tudo acontece por clique (Manual Mestre).
-import { sb, $, main, esc, hoje, dataBR, toast, q, formulario, funcao, registrarFalha } from './util.js';
+import { sb, $, main, esc, hoje, dataBR, toast, q, formulario, confirma, funcao, registrarFalha } from './util.js';
 
-export const AREAS = [['00', 'Central de Controle'], ['01', 'Direção e Estratégia'], ['02', 'Administrativo e Jurídico'], ['03', 'Financeiro e Contabilidade'],
-  ['04', 'Comercial e Prospecção'], ['05', 'Propostas e Negociações'], ['06', 'Contratos e Documentação'], ['07', 'Clientes e Onboarding'],
-  ['08', 'Catálogo de Serviços'], ['09', 'Projetos e Operações'], ['10', 'Produção e Criação'], ['11', 'Marketing ROVYA'],
-  ['12', 'Identidade Visual e Branding'], ['13', 'Processos e Procedimentos'], ['14', 'Relatórios e Inteligência'], ['15', 'Tecnologia e Sistemas'],
-  ['16', 'Biblioteca e Recursos'], ['17', 'Arquivo e Histórico']];
+// as áreas da estrutura ficam em crm_drive (a Sabrina inclui e tira pela tela Documentos); '07' guarda as pastas dos clientes
+const AREA_CLIENTES = '07';
 export const SUBPASTAS = [['01', 'Cadastro'], ['02', 'Diagnóstico'], ['03', 'Propostas e Contratos'], ['04', 'Estratégia'], ['05', 'Branding'], ['06', 'Conteúdo'],
   ['07', 'Projetos'], ['08', 'Aprovações'], ['09', 'Entregas'], ['10', 'Relatórios'], ['11', 'Reuniões'], ['12', 'Histórico']];
 const RAIZ = 'ROVYA — GESTÃO EMPRESARIAL';
@@ -42,12 +39,14 @@ async function existe(id) {
 
 // estrutura-mãe: raiz + 18 áreas. Cria só o que falta; devolve {chave: folder_id}.
 export async function garantirEstrutura() {
-  const ids = Object.fromEntries((await q(sb.from('crm_drive').select('chave,folder_id'))).map(x => [x.chave, x.folder_id]));
-  if (ids.raiz && !await existe(ids.raiz)) { await q(sb.from('crm_drive').delete().neq('chave', '')); for (const k in ids) delete ids[k]; }
+  const linhas = await q(sb.from('crm_drive').select('chave,folder_id,nome').order('chave'));
+  const ids = Object.fromEntries(linhas.filter(x => x.folder_id).map(x => [x.chave, x.folder_id]));
+  // raiz apagada no Drive: esquece os IDs (a lista de áreas continua) e recria tudo
+  if (ids.raiz && !await existe(ids.raiz)) { await q(sb.from('crm_drive').update({ folder_id: null }).neq('chave', '')); for (const k in ids) delete ids[k]; }
   const novas = [];
   if (!ids.raiz) { ids.raiz = await criarPasta(RAIZ); novas.push({ chave: 'raiz', folder_id: ids.raiz, nome: RAIZ }); }
-  for (const [k, n] of AREAS) if (!ids[k]) {
-    const nome = `${k} — ${n}`; ids[k] = await criarPasta(nome, ids.raiz); novas.push({ chave: k, folder_id: ids[k], nome });
+  for (const a of linhas) if (a.chave !== 'raiz' && !ids[a.chave]) {
+    ids[a.chave] = await criarPasta(a.nome, ids.raiz); novas.push({ chave: a.chave, folder_id: ids[a.chave], nome: a.nome });
   }
   if (novas.length) await q(sb.from('crm_drive').upsert(novas));
   return ids;
@@ -62,7 +61,7 @@ export async function criarPastaCliente(c) {
   const ids = await garantirEstrutura();
   let pasta = c.drive_pasta && await existe(c.drive_pasta) ? c.drive_pasta : null;
   const subs = pasta ? { ...(c.drive_subpastas || {}) } : {};
-  if (!pasta) pasta = await criarPasta(`CLIENTE_${codigo}_${slug(c.empresa || c.nome)}`, ids['07']);
+  if (!pasta) pasta = await criarPasta(`CLIENTE_${codigo}_${slug(c.empresa || c.nome)}`, ids[AREA_CLIENTES]);
   for (const [k, n] of SUBPASTAS) if (marcadas.includes(k) && !subs[k]) subs[k] = await criarPasta(`${k} ${n}`, pasta);
   await q(sb.from('crm_clientes').update({ drive_pasta: pasta, drive_subpastas: subs }).eq('id', c.id));
   Object.assign(c, { codigo, drive_pasta: pasta, drive_subpastas: subs });
@@ -149,18 +148,35 @@ export function ligarCartaoDrive(c, recarregar) {
 }
 
 // rota #/documentos: estrutura do Drive + últimos documentos
+let editando = false;
 export async function documentos() {
   const [areas, docs] = await Promise.all([
     q(sb.from('crm_drive').select('*').order('chave')),
     q(sb.from('crm_documentos').select('*,crm_clientes(nome,empresa)').order('criado_em', { ascending: false }).limit(60))]);
-  const raiz = areas.find(a => a.chave === 'raiz');
+  const raiz = areas.find(a => a.chave === 'raiz' && a.folder_id), lista = areas.filter(a => a.chave !== 'raiz');
   main.innerHTML = `<div class="topo"><div><div class="eyebrow">Google Drive</div><h1>Documentos</h1><p>O Drive guarda os arquivos; o CRM guarda onde cada um está.</p></div>
     <div class="acoes">${raiz ? `<a class="bt sec" href="${pastaLink(raiz.folder_id)}" target="_blank" rel="noopener">Abrir no Drive</a>` : ''}<button class="bt" id="estr">${raiz ? 'Conferir estrutura' : 'Criar estrutura no Drive'}</button></div></div>
     <div class="grade2">
       <section class="card"><h3>Últimos arquivos</h3><ul class="lista">${docs.map(linhaDoc).join('') || '<li class="vazio">Nenhum arquivo ainda. Envie pela ficha do cliente, pela proposta ou pelo contrato.</li>'}</ul></section>
-      <section class="card"><h3>Estrutura</h3><ul class="lista">${AREAS.map(([k, n]) => { const a = areas.find(x => x.chave === k);
-        return `<li>${a ? `<a class="cresce" href="${pastaLink(a.folder_id)}" target="_blank" rel="noopener">${k} — ${esc(n)}</a>` : `<span class="cresce mute">${k} — ${esc(n)}</span>`}</li>`; }).join('')}</ul></section>
+      <section class="card"><div style="display:flex;justify-content:space-between;align-items:center;gap:8px"><h3>Estrutura</h3><button class="bt peq ${editando ? '' : 'fantasma'}" id="editEstr">${editando ? 'Concluir' : 'Editar estrutura'}</button></div>
+        <ul class="lista">${lista.map(a => `<li>${a.folder_id ? `<a class="cresce" href="${pastaLink(a.folder_id)}" target="_blank" rel="noopener">${esc(a.nome)}</a>` : `<span class="cresce mute">${esc(a.nome)}${raiz ? ' · ainda não criada no Drive' : ''}</span>`}${editando
+          ? (a.chave === AREA_CLIENTES ? '<small class="mute" title="As pastas dos clientes são criadas aqui">pastas dos clientes</small>' : `<button class="bt peq fantasma" data-tirar="${esc(a.chave)}" style="color:var(--bad)">Remover</button>`) : ''}</li>`).join('') || '<li class="vazio">Nenhuma área na estrutura.</li>'}</ul>
+        ${editando ? '<button class="bt peq sec" id="novaArea" style="margin-top:10px">+ Adicionar pasta</button>' : ''}</section>
     </div>`;
+  $('#editEstr').onclick = () => { editando = !editando; documentos(); };
+  main.querySelectorAll('[data-tirar]').forEach(b => b.onclick = async () => {
+    const a = lista.find(x => x.chave === b.dataset.tirar);
+    if (!await confirma(`Tirar “${a.nome}” da estrutura?`)) return;
+    await q(sb.from('crm_drive').delete().eq('chave', a.chave));
+    toast(a.folder_id ? 'Tirada da estrutura. A pasta continua no Drive com tudo o que tem dentro.' : 'Tirada da estrutura'); documentos();
+  });
+  if ($('#novaArea')) $('#novaArea').onclick = async () => {
+    const prox = String(Math.max(-1, ...lista.map(a => parseInt(a.chave, 10)).filter(n => !isNaN(n))) + 1).padStart(2, '0');
+    const v = await formulario('Adicionar pasta à estrutura', [{ k: 'nome', l: `Nome da pasta (vai ficar “${prox} — …”)`, req: true }], {}, '', 'Adicionar');
+    if (!v) return;
+    await q(sb.from('crm_drive').insert({ chave: prox, nome: `${prox} — ${v.nome}` }));
+    toast(raiz ? 'Adicionada. Clique em “Conferir estrutura” para criar a pasta no Drive.' : 'Adicionada'); documentos();
+  };
   $('#estr').onclick = async () => {
     try { toast('Conferindo o Drive…'); await garantirEstrutura(); toast('Estrutura pronta'); documentos(); } catch (e) { toast(e.message, true); }
   };
