@@ -10,6 +10,9 @@ export const diaLocal = (mais = 0) => new Date(Date.now() + mais * 864e5).toLoca
 export const hoje = () => diaLocal();
 export const dataBR = d => d ? new Date(d + (d.length === 10 ? 'T12:00' : '')).toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' }) : '';
 export const venceu = d => d && d < hoje();
+// primeiro dia do mês, n meses atrás (AAAA-MM-01). Corte por mês, não por dia: a consulta fica igual o mês todo,
+// então a cópia do aparelho (sw.js) continua valendo sem internet no dia seguinte.
+export const mesesAtras = n => { const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() - n); return d.toLocaleDateString('sv').slice(0, 7) + '-01'; };
 
 export function toast(msg, erro) {
   const t = $('#toast'); t.textContent = msg; t.className = 'on' + (erro ? ' erro' : '');

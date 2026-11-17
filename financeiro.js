@@ -1,6 +1,6 @@
 // Financeiro: livro de lançamentos (receitas e despesas), com ou sem projeto.
 // Fluxo: contrato/serviço → lançamento → cobrança externa → confirmação manual (Recebi/Paguei) → relatório. Nada muda sozinho.
-import { sb, $, main, esc, brl, hoje, diaLocal, dataBR, venceu, toast, q, formulario, listaClientes, opcoesClientes } from './util.js';
+import { sb, $, main, esc, brl, hoje, diaLocal, dataBR, venceu, toast, q, formulario, listaClientes, opcoesClientes, mesesAtras } from './util.js';
 
 const CATEGORIAS = {
   receita: ['Projeto', 'Mensalidade', 'Avulso', 'Outros'],
@@ -88,11 +88,19 @@ const FILTROS = {
   pagas: ['Pagas/recebidas', x => x.pago_em],
   todas: ['Todas', () => true] };
 
-export async function financeiro(filtro = 'receitas') {
+const SEL_PARC = '*,crm_projetos(id,nome),crm_clientes(id,codigo,nome,empresa),crm_contratos(id,titulo)';
+// abre com o que importa no dia a dia: tudo em aberto + o que venceu ou foi pago nos últimos 12 meses.
+// Anos anteriores: seletor de período (a lista e o CSV mudam; os indicadores do topo são sempre do momento).
+export async function financeiro(filtro = 'receitas', ano = '') {
   if (!FILTROS[filtro]) filtro = 'receitas';
-  const [ps, cs] = await Promise.all([
-    q(sb.from('crm_parcelas').select('*,crm_projetos(id,nome),crm_clientes(id,codigo,nome,empresa),crm_contratos(id,titulo)').order('vencimento')),
-    listaClientes()]);
+  const desde = mesesAtras(12);
+  const [ps, cs, primeira, doAno] = await Promise.all([
+    q(sb.from('crm_parcelas').select(SEL_PARC).or(`pago_em.is.null,vencimento.gte.${desde},pago_em.gte.${desde}`).order('vencimento')),
+    listaClientes(),
+    sb.from('crm_parcelas').select('vencimento').order('vencimento').limit(1).then(r => r.data?.[0]?.vencimento, () => null),
+    ano ? q(sb.from('crm_parcelas').select(SEL_PARC).gte('vencimento', ano + '-01-01').lte('vencimento', ano + '-12-31').order('vencimento')) : null]);
+  const anoAtual = +hoje().slice(0, 4), anos = [];
+  for (let a = anoAtual; a >= Math.min(anoAtual, +(primeira || hoje()).slice(0, 4)); a--) anos.push(String(a));
   const mes = hoje().slice(0, 7), em30 = diaLocal(30);
   const rec = ps.filter(x => !ehDespesa(x)), desp = ps.filter(ehDespesa);
   const recMes = soma(rec.filter(x => x.pago_em?.startsWith(mes))), pagoMes = soma(desp.filter(x => x.pago_em?.startsWith(mes)));
@@ -104,7 +112,7 @@ export async function financeiro(filtro = 'receitas') {
   const barra = (v, cor, rot) => `<div title="${rot}: ${brl(v)}" style="flex:1;height:${Math.max(2, 52 * v / max)}px;background:${cor};border-radius:3px 3px 0 0"></div>`;
   const quadrado = cor => `<i style="display:inline-block;width:8px;height:8px;border-radius:2px;background:${cor}"></i>`;
   const CR = 'var(--wine)', CD = '#c9a06388';
-  const lista = ps.filter(FILTROS[filtro][1]);
+  const base = doAno || ps, lista = base.filter(FILTROS[filtro][1]);
   main.innerHTML = `<div class="topo"><div><div class="eyebrow">Dinheiro</div><h1>Financeiro</h1><p>“Recebi” e “Paguei” são sempre manuais: nada muda sozinho.</p></div>
       <div class="acoes"><button class="bt sec" id="csv">Exportar CSV</button><button class="bt sec" id="nDesp">+ Despesa</button><button class="bt" id="nRec">+ Receita</button></div></div>
     <div class="grade" style="margin-bottom:18px">
@@ -118,18 +126,20 @@ export async function financeiro(filtro = 'receitas') {
           <div style="width:100%;display:flex;align-items:flex-end;gap:2px;height:52px">${barra(rM[i], CR, m + ' recebido')}${barra(dM[i], CD, m + ' pago')}</div>
           <small class="mute" style="font-size:.62rem">${new Date(m + '-15').toLocaleDateString('pt-BR', { month: 'short' }).replace('.', '')}</small></div>`).join('')}</div>
         <small class="mute" style="font-size:.68rem">${quadrado(CR)} receitas &nbsp; ${quadrado(CD)} despesas</small></div></div>
-    <div class="tabs" style="overflow-x:auto">${Object.entries(FILTROS).map(([f, [l]]) => `<button data-f="${f}" class="${f === filtro ? 'on' : ''}">${l}</button>`).join('')}</div>
+    <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap"><div class="tabs" style="overflow-x:auto;flex:1">${Object.entries(FILTROS).map(([f, [l]]) => `<button data-f="${f}" class="${f === filtro ? 'on' : ''}">${l}</button>`).join('')}</div>
+      <select id="periodo" aria-label="Período" style="margin-bottom:18px;width:auto;padding:8px 14px;border:1px solid var(--line);border-radius:999px;background:var(--card);color:var(--ink);font:inherit;font-size:.85rem;cursor:pointer"><option value="">Últimos 12 meses + em aberto</option>${anos.map(a => `<option ${a === ano ? 'selected' : ''}>${a}</option>`).join('')}</select></div>
     <div class="card"><table><thead><tr><th>Vence</th><th>Descrição</th><th>Categoria</th><th class="dir">Valor</th><th>Situação</th><th></th></tr></thead><tbody>${lista.map(x => linhaParcela(x, true)).join('') || '<tr><td colspan="6" class="vazio">Nada aqui.</td></tr>'}</tbody></table></div>`;
-  const recarregar = () => financeiro(filtro);
-  main.querySelectorAll('[data-f]').forEach(b => b.onclick = () => financeiro(b.dataset.f));
-  ligarParcelas(main, ps, recarregar, cs);
+  const recarregar = () => financeiro(filtro, ano);
+  main.querySelectorAll('[data-f]').forEach(b => b.onclick = () => financeiro(b.dataset.f, ano));
+  $('#periodo').onchange = e => financeiro(filtro, e.target.value);
+  ligarParcelas(main, base, recarregar, cs);
   const novo = async tipo => {
     const v = await formulario(tipo === 'despesa' ? 'Nova despesa' : 'Nova receita', camposLanc(tipo, cs), { vencimento: hoje(), categoria: tipo === 'receita' ? 'Avulso' : null });
     if (v) { await q(sb.from('crm_parcelas').insert({ ...v, tipo, valor: r2(v.valor) })); toast('Lançamento criado'); recarregar(); }
   };
   $('#nRec').onclick = () => novo('receita');
   $('#nDesp').onclick = () => novo('despesa');
-  $('#csv').onclick = () => baixarCsv(lista, `financeiro-${filtro}-${hoje()}.csv`);
+  $('#csv').onclick = () => baixarCsv(lista, `financeiro-${filtro}-${ano || 'ultimos-12-meses'}-${hoje()}.csv`);
 }
 
 // CSV para o Excel brasileiro: separador ;, vírgula decimal, BOM UTF-8. Despesa sai com valor negativo.

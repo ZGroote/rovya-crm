@@ -1,4 +1,4 @@
-import { sb, $, main, esc, brl, diaLocal, hoje, dataBR, venceu, toast, q, rotulo, preencher, mdHtml, mdTexto, formulario, confirma, listaClientes, opcoesClientes, funcao, baixarCsv, semRede, sessaoSalva, registrarFalha, anexosGrandes, LIMITE_ANEXO_MB, salvar, comPendentes, campos, lerEscritas, limparEscritas, enviarEscritas } from './util.js';
+import { sb, $, main, esc, brl, diaLocal, hoje, dataBR, venceu, toast, q, rotulo, preencher, mdHtml, mdTexto, formulario, confirma, listaClientes, opcoesClientes, funcao, baixarCsv, semRede, sessaoSalva, registrarFalha, anexosGrandes, LIMITE_ANEXO_MB, salvar, comPendentes, campos, lerEscritas, limparEscritas, enviarEscritas, mesesAtras } from './util.js';
 import { producao, STATUS_ENT, FORMATOS, seloPeca } from './producao.js';
 import { servicos, propostas, proposta, novaProposta, propostasDoCliente } from './comercial.js';
 import { contratos, contrato, novoContrato, alertasContratos, contratosDoCliente } from './contratos.js';
@@ -163,8 +163,9 @@ async function moverOportunidade(o, etapa, extra = {}) {
   }
 }
 async function funil() {
-  const ops = comPendentes('crm_oportunidades', await q(sb.from('crm_oportunidades').select('*,crm_clientes(nome,empresa)').order('ordem')));
-  main.innerHTML = `<div class="topo"><div><div class="eyebrow">Comercial</div><h1>Funil</h1><p>Arraste os cartões entre as colunas. Ao chegar em “Fechado”, o projeto é criado a partir do seu modelo.</p></div>
+  const ops = comPendentes('crm_oportunidades', await q(sb.from('crm_oportunidades').select('*,crm_clientes(nome,empresa)')
+    .or(`etapa.not.in.(ganho,perdido),atualizado_em.gte.${mesesAtras(3)}`).order('ordem'))); // fechados e perdidos: só os dos últimos 3 meses (os antigos ficam na ficha do cliente)
+  main.innerHTML = `<div class="topo"><div><div class="eyebrow">Comercial</div><h1>Funil</h1><p>Arraste os cartões entre as colunas. Ao chegar em “Fechado”, o projeto é criado a partir do seu modelo. Fechados e perdidos aparecem por 3 meses; depois ficam na ficha do cliente.</p></div>
     <button class="bt" id="nOp">+ Oportunidade</button></div>
     <div class="funil">${ETAPAS_FUNIL.map(([k, l]) => {
       const lst = ops.filter(o => o.etapa === k), tot = lst.reduce((s, o) => s + (Number(o.valor) || 0), 0);
@@ -268,11 +269,13 @@ async function criarProjeto(clienteId, nome, oportunidadeId = null, valor = null
   await q(sb.from('crm_projetos').update({ valor: v.valor, entrega_prevista: v.entrega_prevista }).eq('id', pid));
   toast('Projeto criado'); location.hash = '#/projeto/' + pid; return pid;
 }
-async function projetos() {
-  const ps = await q(sb.from('crm_projetos').select('*,crm_clientes(nome,empresa),crm_etapas(crm_entregas(status))').order('criado_em', { ascending: false }));
+async function projetos(arquivados) {
+  arquivados = arquivados === 'arquivados';
+  const sel = sb.from('crm_projetos').select('*,crm_clientes(nome,empresa),crm_etapas(crm_entregas(status))');
+  const ps = await q((arquivados ? sel : sel.neq('status', 'arquivado')).order('criado_em', { ascending: false })); // arquivados só quando ela pede
   const prog = p => { const es = p.crm_etapas.flatMap(e => e.crm_entregas); return es.length ? Math.round(100 * es.filter(e => e.status === 'aprovado').length / es.length) : 0; };
   const grupo = st => ps.filter(p => p.status === st).map(p => `<a class="card linkcard" href="#/projeto/${p.id}"><b>${esc(p.nome)}</b><p class="mute" style="margin:2px 0 12px">${esc(p.crm_clientes?.empresa || p.crm_clientes?.nome)}${p.entrega_prevista ? ' · entrega ' + dataBR(p.entrega_prevista) : ''}</p><div class="barra"><i style="width:${prog(p)}%"></i></div><small class="mute">${prog(p)}% aprovado</small></a>`).join('');
-  main.innerHTML = `<div class="topo"><div><div class="eyebrow">Produção</div><h1>Projetos</h1></div><button class="bt" id="nProj">+ Projeto</button></div>
+  main.innerHTML = `<div class="topo"><div><div class="eyebrow">Produção</div><h1>Projetos</h1></div><div class="acoes"><a class="bt sec" href="#/projetos${arquivados ? '' : '/arquivados'}">${arquivados ? 'Esconder arquivados' : 'Mostrar arquivados'}</a><button class="bt" id="nProj">+ Projeto</button></div></div>
     ${STATUS_PROJ.map(([k, l]) => { const g = grupo(k); return g ? `<h2 style="margin:8px 0 12px">${l}</h2><div class="grade" style="margin-bottom:26px">${g}</div>` : ''; }).join('') || '<p class="vazio">Nenhum projeto ainda. Projetos nascem quando uma oportunidade é fechada no funil, ou pelo botão acima.</p>'}`;
   $('#nProj').onclick = async () => {
     const cs = await listaClientes(); if (!cs.length) { toast('Cadastre um cliente primeiro'); return; }
