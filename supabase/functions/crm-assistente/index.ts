@@ -34,18 +34,31 @@ async function agenda(dias: number) {
     titulo: e.summary || '(sem título)', local: e.location || undefined, dia: (e.start?.dateTime ? new Date(e.start.dateTime).toLocaleDateString('sv', { timeZone: TZ }) : e.start?.date) }));
 }
 
+// Só o que está vivo vai para a IA (aberto, em andamento ou do último ano): mandar a história inteira deixaria
+// cada pergunta mais cara e mais lenta a cada mês. Para perguntas de anos anteriores, vão os totais por ano.
 async function retrato() {
-  const [cli, ops, projs, parc, ag, contr, tars, hist, props] = await Promise.all([
+  const desde = new Date(Date.now() - 365 * 864e5).toISOString().slice(0, 10);
+  const [cli, ops, projs, parc, ag, contr, tars, hist, props, anos] = await Promise.all([
     db.from('crm_clientes').select('id,codigo,nome,empresa,origem,criado_em').order('nome'),
-    db.from('crm_oportunidades').select('titulo,etapa,valor,proximo_passo,proximo_em,motivo_perda,atualizado_em,crm_clientes(nome,empresa)'),
-    db.from('crm_projetos').select('nome,status,valor,entrega_prevista,inicio,crm_clientes(nome,empresa),crm_etapas(ordem,titulo,crm_entregas(ordem,titulo,status,prazo))'),
-    db.from('crm_parcelas').select('tipo,categoria,descricao,valor,vencimento,pago_em,forma,crm_projetos(nome)').order('vencimento'),
+    db.from('crm_oportunidades').select('titulo,etapa,valor,proximo_passo,proximo_em,motivo_perda,atualizado_em,crm_clientes(nome,empresa)')
+      .or(`etapa.not.in.(ganho,perdido),atualizado_em.gte.${desde}`),
+    db.from('crm_projetos').select('nome,status,valor,entrega_prevista,inicio,crm_clientes(nome,empresa),crm_etapas(ordem,titulo,crm_entregas(ordem,titulo,status,prazo))')
+      .or(`status.in.(ativo,pausado),criado_em.gte.${desde}`).neq('status', 'arquivado'),
+    db.from('crm_parcelas').select('tipo,categoria,descricao,valor,vencimento,pago_em,forma,crm_projetos(nome)').or(`pago_em.is.null,vencimento.gte.${desde}`).order('vencimento'),
     agenda(14),
-    db.from('crm_contratos').select('titulo,tipo,status,inicio,fim,valor_mensal,valor_avulso,renovacao_auto,aviso_dias,crm_clientes(nome,empresa)').order('fim'),
+    db.from('crm_contratos').select('titulo,tipo,status,inicio,fim,valor_mensal,valor_avulso,renovacao_auto,aviso_dias,crm_clientes(nome,empresa)')
+      .or(`status.in.(rascunho,assinatura,vigente),fim.gte.${desde}`).order('fim'),
     db.from('crm_tarefas').select('titulo,prioridade,prazo,status,concluida_em,crm_projetos(nome)').neq('status', 'feita').order('prazo'),
     db.from('crm_interacoes').select('tipo,resumo,data,crm_clientes(nome,empresa)').order('data', { ascending: false }).limit(40),
-    db.from('crm_propostas').select('grupo,titulo,versao,status,valor,validade,enviada_em,crm_clientes(nome,empresa)').order('versao', { ascending: false }),
+    db.from('crm_propostas').select('grupo,titulo,versao,status,valor,validade,enviada_em,crm_clientes(nome,empresa)')
+      .or(`status.in.(rascunho,enviada),criado_em.gte.${desde}`).order('versao', { ascending: false }),
+    db.from('crm_parcelas').select('tipo,valor,pago_em').not('pago_em', 'is', null), // só para os totais por ano
   ]);
+  const totais: Record<string, { recebido: number, pago: number }> = {};
+  for (const x of anos.data ?? []) {
+    const a = (totais[x.pago_em.slice(0, 4)] ||= { recebido: 0, pago: 0 });
+    if (x.tipo === 'receita') a.recebido += Number(x.valor) || 0; else a.pago += Number(x.valor) || 0;
+  }
   const ultimas = new Map<string, any>(); // só a última versão de cada proposta
   for (const p of props.data ?? []) if (!ultimas.has(p.grupo)) ultimas.set(p.grupo, p);
   const quem = (c: any) => c ? (c.empresa ? `${c.empresa} (${c.nome})` : c.nome) : '';
@@ -57,6 +70,7 @@ async function retrato() {
     projetos: (projs.data ?? []).map((p: any) => ({ nome: p.nome, cliente: quem(p.crm_clientes), status: p.status, valor: p.valor, inicio: p.inicio, entrega_prevista: p.entrega_prevista,
       etapas: (p.crm_etapas ?? []).sort((a: any, b: any) => a.ordem - b.ordem).map((e: any) => ({ etapa: e.titulo,
         entregas: (e.crm_entregas ?? []).sort((a: any, b: any) => a.ordem - b.ordem).map((x: any) => `${x.titulo} [${x.status}${x.prazo ? ', prazo ' + x.prazo : ''}]`) })) })),
+    totais_por_ano_pagos: totais, // receitas recebidas e despesas pagas de todos os anos (os lançamentos abaixo são só do último ano + em aberto)
     lancamentos: (parc.data ?? []).map((x: any) => ({ tipo: x.tipo, categoria: x.categoria, projeto: x.crm_projetos?.nome, descricao: x.descricao, valor: x.valor, vencimento: x.vencimento, pago_em: x.pago_em, forma: x.forma })),
     contratos: (contr.data ?? []).map((x: any) => ({ cliente: quem(x.crm_clientes), titulo: x.titulo, tipo: x.tipo, status: x.status, inicio: x.inicio, fim: x.fim,
       valor_mensal: x.valor_mensal, valor_avulso: x.valor_avulso, renovacao_auto: x.renovacao_auto, aviso_dias: x.aviso_dias })),
@@ -91,6 +105,7 @@ Responda só com base nos DADOS DO CRM abaixo. Se algo não estiver nos dados, d
 Você ainda não consegue alterar nada no CRM; se ela pedir para mudar algo, explique onde fazer isso no CRM (Funil, Clientes, Projetos, Agenda, Financeiro ou Modelos).
 Status das entregas: a_fazer, produzindo, enviado, revisao, aprovado. Etapas do funil: contato, diagnostico, proposta, negociacao, ganho, perdido.
 Contratos: tipo recorrente (valor_mensal), avulso (valor_avulso) ou misto (os dois); status rascunho, assinatura, vigente, encerrado, cancelado; avise quando um vigente estiver a aviso_dias ou menos do fim. Propostas: status rascunho, enviada, aprovada, recusada (só a última versão de cada uma). Lançamentos: tipo receita ou despesa; pago_em vazio = em aberto. Tarefas: prioridade baixa/media/alta. historico_contatos: últimos contatos registrados com cada cliente (use para lembrar quem está sem retorno).
+Os dados trazem o que está em aberto ou em andamento e o que aconteceu no último ano (funil, projetos, lançamentos, contratos, propostas); de anos anteriores vêm só totais_por_ano_pagos. Se ela perguntar um detalhe mais antigo que isso, diga que o resumo só traz o último ano e indique a tela do CRM onde está (Financeiro, Projetos, Contratos…).
 Quando ela pedir o resumo do dia, organize em: agenda de hoje, entregas e tarefas com prazo hoje ou atrasadas, dinheiro a receber e contas a pagar hoje ou atrasados, próximos passos do funil vencendo, contratos a vencer ou aguardando assinatura, propostas enviadas ainda sem resposta, e termine com uma sugestão prática de prioridade. Se o dia estiver vazio, diga isso com leveza.`;
 
 const MODELO = 'gemini-3.8-flash';

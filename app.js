@@ -638,10 +638,22 @@ function copiaCompleta() {
   return navigator.locks ? navigator.locks.request('rovya-copia', { ifAvailable: true }, l => l && copiar()) : copiar();
 }
 async function copiar() {
-  const fichas = async (t, rota, filtro = s => s) => ((await filtro(sb.from(t).select('id'))).data || []).map(x => `${rota}/${x.id}`);
+  // só as fichas vivas (com 200 clientes, copiar tudo seriam mais de mil consultas a cada 30 min);
+  // as antigas continuam com a cópia da última vez que foram abertas
+  const desde = diaLocal(-365), vivos = ['rascunho', 'assinatura', 'vigente'];
+  const ids = async (t, col, filtro) => ((await filtro(sb.from(t).select(col))).data || []).map(x => x[col]).filter(Boolean);
+  const [projs, contrs, props, ...cli] = await Promise.all([
+    ids('crm_projetos', 'id', s => s.in('status', ['ativo', 'pausado'])),
+    ids('crm_contratos', 'id', s => s.or(`status.in.(${vivos}),fim.gte.${desde}`)),
+    ids('crm_propostas', 'id', s => s.or(`status.in.(rascunho,enviada),criado_em.gte.${desde}`)),
+    // cliente vivo: novo no último ano, com projeto ou contrato em andamento, oportunidade aberta ou contato no último ano
+    ids('crm_clientes', 'id', s => s.gte('criado_em', desde)),
+    ids('crm_projetos', 'cliente_id', s => s.in('status', ['ativo', 'pausado'])),
+    ids('crm_contratos', 'cliente_id', s => s.in('status', vivos)),
+    ids('crm_oportunidades', 'cliente_id', s => s.or(`etapa.not.in.(ganho,perdido),atualizado_em.gte.${desde}`)),
+    ids('crm_interacoes', 'cliente_id', s => s.gte('data', desde))]);
   const rotas = ['funil', 'propostas', 'contratos', 'clientes', 'projetos', 'producao', 'tarefas', 'agenda', 'financeiro', 'relatorios', 'documentos', 'servicos', 'modelos', 'configuracoes',
-    ...await fichas('crm_clientes', 'cliente'), ...await fichas('crm_projetos', 'projeto', s => s.neq('status', 'arquivado')),
-    ...await fichas('crm_contratos', 'contrato'), ...await fichas('crm_propostas', 'proposta')]; // Assistente fica de fora: abrir pede o resumo à IA
+    ...[...new Set(cli.flat())].map(i => 'cliente/' + i), ...projs.map(i => 'projeto/' + i), ...contrs.map(i => 'contrato/' + i), ...props.map(i => 'proposta/' + i)]; // Assistente fica de fora: abrir pede o resumo à IA
   const f = Object.assign(document.createElement('iframe'), { src: location.pathname.split('/').pop() + '?copia=1', hidden: true, title: 'cópia' });
   document.body.append(f);
   try {
@@ -654,6 +666,7 @@ async function copiar() {
     await Promise.all([listaClientes(), projetosAtivos()]).catch(() => { }); // listas dos formulários (nova tarefa, compromisso)
     try { localStorage.setItem(COPIA, Date.now()); } catch { }
     marcarCopia();
+    navigator.serviceWorker.controller?.postMessage({ limpar: 30 }); // tudo vivo acabou de ser renovado: o que passou de 30 dias ninguém usa mais
   } catch (e) { console.warn('cópia completa:', e.message); } finally { f.remove(); }
 }
 

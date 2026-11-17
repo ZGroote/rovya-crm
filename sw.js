@@ -34,8 +34,20 @@ self.addEventListener('fetch', e => {
     e.respondWith(req.clone().text().then(corpo => /"acao":"listar"/.test(corpo) && !/"fresco":true/.test(corpo) ? redeOuCopia(req, chave(url, req, corpo)) : fetch(req)));
 });
 
+// limpeza: cópia que não foi renovada há N dias (fichas apagadas, agenda de dias passados) sai do aparelho.
+// Só roda logo depois de uma cópia completa com internet, então tudo que está em uso acabou de ser renovado.
+async function limpar(dias) {
+  const c = await caches.open(CACHE), limite = Date.now() - dias * 864e5;
+  for (const req of await c.keys()) {
+    if (!/\/(rest|functions)\/v1\//.test(req.url)) continue; // só dados; arquivos do app (login, ícones, scripts) ficam sempre
+    const r = await c.match(req), d = Date.parse(r?.headers.get('date') || '');
+    if (d && d < limite) await c.delete(req); // sem data (fontes de outro site): fica
+  }
+}
+
 // o app manda a lista do que a tela carregou (scripts, estilos, fontes) para já ficar salvo
 self.addEventListener('message', e => {
+  if (e.data?.limpar) return e.waitUntil(limpar(e.data.limpar));
   if (!e.data?.guardar) return;
   e.waitUntil(caches.open(CACHE).then(c => Promise.all(e.data.guardar.map(async u => {
     const url = new URL(u, location.href);
