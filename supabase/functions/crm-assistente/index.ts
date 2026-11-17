@@ -12,7 +12,7 @@ const SUPA = Deno.env.get('SUPABASE_URL')!, SR = Deno.env.get('SUPABASE_SERVICE_
 const env = (k: string) => Deno.env.get(k) ?? '';
 const db = createClient(SUPA, SR, { auth: { persistSession: false } });
 const TZ = 'America/Sao_Paulo';
-const APP = 'https://zgroote.github.io/rovya-crm/app.html';
+const APP = 'https://crm.rovyacreative.com.br/app.html';
 const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization, content-type, apikey, x-client-info, x-cron', 'Access-Control-Allow-Methods': 'POST, OPTIONS' };
 const json = (o: unknown, s = 200) => new Response(JSON.stringify(o), { status: s, headers: { ...cors, 'Content-Type': 'application/json' } });
 const hojeSP = () => new Date().toLocaleDateString('sv', { timeZone: TZ });
