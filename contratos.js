@@ -1,5 +1,5 @@
 // Contratos: recorrentes, avulsos e mistos. Só alerta datas; nada muda de status sozinho.
-import { sb, $, main, esc, brl, hoje, diaLocal, dataBR, toast, q, rotulo, formulario, confirma, listaClientes, opcoesClientes } from './util.js';
+import { sb, $, main, esc, brl, hoje, diaLocal, dataBR, toast, q, rotulo, formulario, confirma, listaClientes, opcoesClientes, anexosGrandes } from './util.js';
 import { enviarAoDrive, criarPastaCliente, linhaDoc } from './drive.js';
 import { lancarMensalidades } from './financeiro.js';
 
@@ -139,6 +139,7 @@ export async function contrato(id) {
   };
   $('#arq').onchange = async e => {
     const f = e.target.files[0]; if (!f) return;
+    if (anexosGrandes([f])) { e.target.value = ''; return; }
     const caminho = `contratos/${id}/${Date.now()}-${f.name.normalize('NFD').replace(/[^\w.-]+/g, '_')}`;
     toast('Enviando ' + f.name + '…');
     await q(sb.storage.from('crm-anexos').upload(caminho, f));

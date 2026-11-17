@@ -1,4 +1,4 @@
-import { sb, $, main, esc, brl, diaLocal, hoje, dataBR, venceu, toast, q, rotulo, preencher, mdHtml, mdTexto, formulario, confirma, listaClientes, opcoesClientes, funcao, baixarCsv, semRede, sessaoSalva, registrarFalha } from './util.js';
+import { sb, $, main, esc, brl, diaLocal, hoje, dataBR, venceu, toast, q, rotulo, preencher, mdHtml, mdTexto, formulario, confirma, listaClientes, opcoesClientes, funcao, baixarCsv, semRede, sessaoSalva, registrarFalha, anexosGrandes, LIMITE_ANEXO_MB } from './util.js';
 import { producao, STATUS_ENT, FORMATOS, seloPeca } from './producao.js';
 import { servicos, propostas, proposta, novaProposta, propostasDoCliente } from './comercial.js';
 import { contratos, contrato, novoContrato, alertasContratos, contratosDoCliente } from './contratos.js';
@@ -335,7 +335,7 @@ async function abrirEntrega(x, p) {
   const anexos = await q(sb.from('crm_anexos').select('*').eq('entrega_id', x.id).order('criado_em'));
   const links = await Promise.all(anexos.map(async a => { const { data } = await sb.storage.from('crm-anexos').createSignedUrl(a.caminho, 3600); return { ...a, url: data?.signedUrl }; }));
   const extra = `<div><label>Anexos</label><div class="anexos">${links.map(a => `<span><a href="${esc(a.url)}" target="_blank" rel="noopener">${esc(a.nome)}</a> <small class="mute">${((a.tamanho || 0) / 1048576).toFixed(1)} MB</small> <button type="button" class="bt peq fantasma" data-del-anexo="${a.id}">remover</button></span>`).join('') || '<span class="vazio">Nenhum arquivo.</span>'}
-    <input type="file" id="arq" multiple></div></div>
+    <input type="file" id="arq" multiple> <small class="mute">até ${LIMITE_ANEXO_MB} MB por arquivo</small></div></div>
     ${x.revisoes || x.aprovado_em ? `<small class="mute">${x.revisoes ? `Voltou ${x.revisoes}× para revisão. ` : ''}${x.aprovado_em ? 'Aprovada em ' + new Date(x.aprovado_em).toLocaleDateString('pt-BR') + '.' : ''}</small>` : ''}
     <button class="bt fantasma" value="apagar" formnovalidate style="justify-self:start;color:var(--bad)">Apagar entrega</button>`;
   const pr = formulario(x.titulo, [
@@ -349,6 +349,7 @@ async function abrirEntrega(x, p) {
     await q(sb.storage.from('crm-anexos').remove([a.caminho])); await q(sb.from('crm_anexos').delete().eq('id', a.id)); b.parentElement.remove(); toast('Arquivo removido');
   });
   const arquivos = $('#arq');
+  arquivos.onchange = () => { if (anexosGrandes(arquivos.files)) arquivos.value = ''; }; // avisa já na escolha, antes de salvar
   const v = await pr;
   if ($('#dlg').returnValue === 'apagar') { if (await confirma(`Apagar a entrega “${x.titulo}”?`)) await q(sb.from('crm_entregas').delete().eq('id', x.id)); return; }
   if (!v) return;
