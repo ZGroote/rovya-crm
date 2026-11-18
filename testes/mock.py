@@ -71,6 +71,9 @@ D = {'crm_clientes': [{**c, 'crm_projetos': [{'id': 'pr1', 'nome': proj['nome'],
      'crm_oportunidades': ops, 'crm_projetos': [proj], 'crm_entregas': ents, 'crm_parcelas': parc,
      'crm_servicos': serv, 'crm_propostas': props, 'crm_contratos': contr, 'crm_drive': drive, 'crm_documentos': docs, 'crm_tarefas': tarefas, 'crm_log': logs, 'crm_falhas': [{'id':1,'quando':'2026-11-16T11:00:00Z','origem':'drive','acao':'POST /upload/drive/v3/files','mensagem':'Drive: Insufficient Permission','resolvida':False}], 'crm_interacoes': cli[0]['crm_interacoes'],
      'crm_anexos': [{'id': 'a', 'nome': 'Revista.pdf', 'caminho': 'x', 'tamanho': 5200000}],
+     'crm_links': [{'id': 'l1', 'titulo': 'Agende uma primeira conversa', 'url': 'https://rovyacreative.com.br/agendar', 'descricao': 'Online, pelo Google Meet', 'destaque': True, 'ativo': True, 'ordem': 1},
+                   {'id': 'l2', 'titulo': 'Conheça a ROVYA', 'url': 'https://rovyacreative.com.br/', 'descricao': None, 'destaque': False, 'ativo': True, 'ordem': 2},
+                   {'id': 'l3', 'titulo': 'Revista', 'url': 'https://rovyacreative.com.br/', 'descricao': 'Em breve', 'destaque': False, 'ativo': False, 'ordem': 3}],
      'crm_modelos': [{'id': 'm1', 'tipo': 'projeto', 'titulo': 'Gestão estratégica da comunicação', 'corpo': 'Estrutura completa usada no projeto Imobiliária Horizonte (out/2026): 6 etapas.', 'estrutura': est},
                      modelo_prop, {'id': 'm2', 'tipo': 'whatsapp', 'titulo': 'Primeiro contato', 'corpo': 'Oi, {{contato}}! Aqui é a Sabrina, da Rovya. Vi o trabalho da {{empresa}} e…'}]}
 EV = {'conectado': True, 'email': 'rovyacreative@gmail.com', 'eventos': [

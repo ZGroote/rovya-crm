@@ -50,7 +50,7 @@ addEventListener('error', e => { // erro de outro endereço (extensão do navega
 addEventListener('unhandledrejection', e => registrarErro(e.reason?.message || e.reason));
 
 /* ---------- roteador ---------- */
-const rotas = { '': inicio, funil, clientes, cliente, projetos, projeto, producao: () => producao(abrirEntrega), financeiro, agenda, modelos, assistente, servicos, propostas, proposta, contratos, contrato, documentos, tarefas, configuracoes, relatorios };
+const rotas = { '': inicio, funil, clientes, cliente, projetos, projeto, producao: () => producao(abrirEntrega), financeiro, agenda, modelos, assistente, servicos, propostas, proposta, contratos, contrato, documentos, tarefas, configuracoes, relatorios, links };
 let navegacao = 0;   // cada troca de tela ganha um número: tela antiga que termina depois não mexe na nova
 async function rotear() {
   const vez = ++navegacao;
@@ -745,6 +745,48 @@ document.addEventListener('input', e => {
 document.addEventListener('change', e => {
   if (e.target.id === 'todosCont') document.querySelectorAll('#listaCont label:not([hidden]) [data-cont]').forEach(x => x.checked = e.target.checked);
 });
+
+/* ---------- LINKS DA BIO (rovyacreative.com.br/links, o link do perfil do Instagram) ----------
+   A página do site lê crm_links direto (só os ativos, sem login): salvou aqui, aparece lá na hora. */
+const PAGINA_LINKS = 'https://rovyacreative.com.br/links';
+const CAMPOS_LINK = [{ k: 'titulo', l: 'Texto do botão', req: true }, { k: 'url', l: 'Link (https://…)', t: 'url', req: true },
+  { k: 'descricao', l: 'Linha pequena embaixo do botão (opcional)' },
+  { k: 'destaque', l: 'Aparência', t: 'select', o: [['', 'Botão normal'], ['1', 'Em destaque (dourado)']], meia: true },
+  { k: 'ativo', l: 'Na página', t: 'select', o: [['1', 'Mostrar'], ['', 'Esconder']], meia: true }];
+async function editarLink(x, ordem) {
+  const v = await formulario(x ? 'Editar link' : 'Novo link', CAMPOS_LINK, x ? { ...x, destaque: x.destaque ? '1' : '', ativo: x.ativo ? '1' : '' } : { ativo: '1', url: 'https://' },
+    x ? '<button class="bt fantasma" value="apagar" formnovalidate style="justify-self:start;color:var(--bad)">Apagar link</button>' : '');
+  if (x && $('#dlg').returnValue === 'apagar') {
+    if (!await confirma(`Apagar “${x.titulo}”? Ele sai da página na hora.`)) return false;
+    await q(sb.from('crm_links').delete().eq('id', x.id)); toast('Link apagado'); return true;
+  }
+  if (!v) return false;
+  if (!/^(https?:\/\/[^\s]+\.[^\s]+|mailto:\S+@\S+|tel:\+?[\d\s()-]+)$/i.test(v.url)) { toast('Confira o link: ele precisa começar com https://', true); return false; }
+  const dados = { titulo: v.titulo, url: v.url, descricao: v.descricao, destaque: !!v.destaque, ativo: !!v.ativo };
+  await q(x ? sb.from('crm_links').update(dados).eq('id', x.id) : sb.from('crm_links').insert({ ...dados, ordem }));
+  toast(dados.ativo ? 'Salvo: já está na página' : 'Salvo, escondido da página'); return true;
+}
+async function links() {
+  const ls = await q(sb.from('crm_links').select('*').order('ordem'));
+  main.innerHTML = `<div class="topo"><div><div class="eyebrow">Instagram</div><h1>Links da bio</h1><p>A página <a href="${PAGINA_LINKS}" target="_blank" rel="noopener">rovyacreative.com.br/links</a> mostra estes botões, nesta ordem. O que você salvar aqui aparece lá na hora.</p></div>
+    <div class="acoes"><button class="bt sec" id="lCopiar">Copiar link da bio</button><a class="bt sec" href="${PAGINA_LINKS}" target="_blank" rel="noopener">Ver página ↗</a><button class="bt" id="lNovo">+ Link</button></div></div>
+    <section class="card"><ul class="lista links-bio">${ls.map((x, i) => `<li${x.ativo ? '' : ' class="oculto"'}>
+      <span class="ordem"><button class="bt peq fantasma" data-sobe="${i}" ${i ? '' : 'disabled'} aria-label="Subir ${esc(x.titulo)}">↑</button><button class="bt peq fantasma" data-desce="${i}" ${i < ls.length - 1 ? '' : 'disabled'} aria-label="Descer ${esc(x.titulo)}">↓</button></span>
+      <span class="cresce"><b>${esc(x.titulo)}</b>${x.destaque ? ' <span class="pill">destaque</span>' : ''}${x.ativo ? '' : ' <span class="pill">escondido</span>'}
+        <br><small class="mute">${x.descricao ? esc(x.descricao) + ' · ' : ''}<a href="${esc(x.url)}" target="_blank" rel="noopener">${esc(x.url)}</a></small></span>
+      <button class="bt peq sec" data-editar="${i}">Editar</button></li>`).join('') || '<li class="vazio">Nenhum link ainda. Comece pelo + Link.</li>'}</ul></section>`;
+  const depois = r => r && links();
+  $('#lNovo').onclick = async () => depois(await editarLink(null, (ls.at(-1)?.ordem ?? 0) + 1));
+  $('#lCopiar').onclick = () => navigator.clipboard.writeText(PAGINA_LINKS).then(() => toast('Copiado: cole no campo "site" do perfil do Instagram'), () => toast(PAGINA_LINKS));
+  main.querySelector('.links-bio').onclick = async e => {
+    const b = e.target.closest('button[data-editar],button[data-sobe],button[data-desce]'); if (!b) return;
+    if (b.dataset.editar) return depois(await editarLink(ls[+b.dataset.editar]));
+    const i = +(b.dataset.sobe ?? b.dataset.desce), j = b.dataset.sobe != null ? i - 1 : i + 1;
+    const [oi, oj] = ls[i].ordem === ls[j].ordem ? [i + 1, j + 1] : [ls[i].ordem, ls[j].ordem];   // troca as posições dos dois
+    await Promise.all([q(sb.from('crm_links').update({ ordem: oj }).eq('id', ls[i].id)), q(sb.from('crm_links').update({ ordem: oi }).eq('id', ls[j].id))]);
+    links();
+  };
+}
 
 /* ---------- ASSISTENTE (IA + notificações, pela Edge Function crm-assistente) ---------- */
 const PEDIDO_RESUMO = 'Bom dia! Me dá o resumo de hoje?';

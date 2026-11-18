@@ -63,7 +63,7 @@ function montarEmail(para: string, assunto: string, texto: string, anexos: { nom
 // Mesma lista e formato do backup manual (configuracoes.js), então o roteiro de restauração do LEIA-ME vale para os dois.
 // Guarda os 12 automáticos mais recentes; os anteriores vão para a lixeira do Drive (recuperáveis por 30 dias).
 const TABELAS = ['crm_clientes', 'crm_oportunidades', 'crm_interacoes', 'crm_servicos', 'crm_propostas', 'crm_contratos', 'crm_projetos', 'crm_etapas',
-  'crm_entregas', 'crm_anexos', 'crm_tarefas', 'crm_parcelas', 'crm_modelos', 'crm_documentos', 'crm_drive', 'crm_agendamentos'];
+  'crm_entregas', 'crm_anexos', 'crm_tarefas', 'crm_parcelas', 'crm_modelos', 'crm_documentos', 'crm_drive', 'crm_agendamentos', 'crm_links'];
 const MANTER = 12, DRIVE = 'https://www.googleapis.com/drive/v3/files';
 async function backupSemanal() {
   const falha = async (m: string) => { await db.from('crm_falhas').insert({ origem: 'backup', acao: 'backup semanal', mensagem: m }); return { ok: false, erro: m }; };

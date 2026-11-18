@@ -20,8 +20,9 @@ h3{font-size:1.15rem}
 .marca span{display:grid;gap:3px}
 .marca b{font:600 1.35rem/1 'Cormorant Garamond',serif;letter-spacing:.14em;color:#f3ebe1}
 .marca small{font:500 .58rem/1 Inter;letter-spacing:.42em;color:#c9a063}
-nav{display:grid;gap:2px}
+nav{display:grid;gap:2px;align-content:start;flex:1;min-height:0;overflow-y:auto;scrollbar-width:thin}
 nav a{display:flex;align-items:center;gap:12px;padding:10px 12px;border-radius:8px;text-decoration:none;color:#cbbcae;transition:background .2s,color .2s}
+@media (min-width:761px) and (max-height:900px){nav a{padding:5px 12px}.lado{padding:16px 14px}}
 nav a i{font-style:normal;width:18px;text-align:center;color:#8f7b6c}
 nav a:hover{background:#ffffff0d;color:#fff}
 nav a.on{background:#8e0f1d33;color:#fff}
@@ -229,3 +230,8 @@ body.sem-rede #main::before{content:"Sem internet · mostrando os dados salvos n
 .ev.t-outra{opacity:.8}
 .ev.reserva{background:repeating-linear-gradient(135deg,transparent 0 8px,#b08a4a14 8px 16px);border-style:dashed;border-color:var(--gold)}
 .ev.reserva .h{color:var(--gold)}
+/* links da bio */
+.links-bio .ordem{display:flex;flex-direction:column;gap:2px}
+.links-bio .ordem .bt{padding:2px 8px;line-height:1}
+.links-bio li.oculto .cresce{opacity:.55}
+.links-bio small a{word-break:break-all}
