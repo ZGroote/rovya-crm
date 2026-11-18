@@ -51,13 +51,16 @@ with sync_playwright() as p:
     ok(pg.locator('.ev', has_text='Pilates').is_visible() and pg.locator('.ev', has_text='Reunião Horizonte').is_hidden(), 'filtro “Pessoal” mostra só o pessoal')
     pg.click('#agFiltro [data-filtro=""]')
 
-    # 3) reservar horários para novos clientes (repete toda semana)
+    # 3) reservar horário para novos clientes: 1 hora fixa; sem data = toda semana; mesmo dia = só ele; data = até lá
     pg.click('#reservar'); pg.wait_for_selector('#dlg[open]')
-    pg.fill('#dlgf [name=data]', amanha); pg.fill('#dlgf [name=ini]', '14:00'); pg.fill('#dlgf [name=fim]', '16:00'); pg.fill('#dlgf [name=dur]', '30'); pg.fill('#dlgf [name=ate]', mais3sem)
+    ok(pg.locator('#dlgf [name=dur], #dlgf [name=fim]').count() == 0, 'não pede duração nem horário final')
+    pg.fill('#dlgf [name=data]', amanha); pg.fill('#dlgf [name=hora]', '14:00')
     pg.click('#dlgf button[value=ok]'); pg.wait_for_timeout(600)
     r = ev('criar')[-1]['evento']
-    ok(r['extendedProperties']['private'] == {'crm_reserva': '1', 'crm_slot': '30'} and r['transparency'] == 'transparent', 'reserva marcada como livre, com conversas de 30 min')
-    ok(r['start'] == {'dateTime': amanha + 'T14:00:00', 'timeZone': 'America/Sao_Paulo'} and r['recurrence'] == ['RRULE:FREQ=WEEKLY;UNTIL=' + mais3sem.replace('-', '') + 'T235959Z'], 'horário de Brasília e repetição semanal até a data')
+    ok(r['extendedProperties']['private'] == {'crm_reserva': '1', 'crm_slot': '60'} and r['transparency'] == 'transparent', 'reserva marcada como livre, conversa de 1 hora')
+    ok(r['start'] == {'dateTime': amanha + 'T14:00:00', 'timeZone': 'America/Sao_Paulo'} and r['end'] == {'dateTime': amanha + 'T15:00:00', 'timeZone': 'America/Sao_Paulo'}, '14h vai até as 15h sozinho')
+    ok(r['recurrence'] == ['RRULE:FREQ=WEEKLY'], 'sem data de repetição: toda semana, sem fim')
+    ok('toda semana' in pg.inner_text('#toast'), 'aviso diz que repete toda semana')
     pg.wait_for_selector('.ev.reserva')
     ok('aberto para agendamentos pelo site' in pg.inner_text('.ev.reserva'), 'reserva aparece diferente na agenda')
     pg.screenshot(path=os.path.join(S, 'ag_agenda.png'), full_page=True)
@@ -66,9 +69,16 @@ with sync_playwright() as p:
     pg.click('#dlgf button[value=um]'); pg.wait_for_timeout(500)
     ok(len(ev('apagar')) == 1, 'tirar a reserva apaga do Google')
     pg.click('#reservar'); pg.wait_for_selector('#dlg[open]')
-    pg.fill('#dlgf [name=ini]', '16:00'); pg.fill('#dlgf [name=fim]', '15:00'); n = len(ev('criar'))
+    pg.fill('#dlgf [name=data]', amanha); pg.fill('#dlgf [name=hora]', '09:30'); pg.fill('#dlgf [name=ate]', amanha); pg.click('#dlgf button[value=ok]'); pg.wait_for_timeout(500)
+    r = ev('criar')[-1]['evento']
+    ok('recurrence' not in r and r['end']['dateTime'] == amanha + 'T10:30:00', 'mesmo dia na repetição: só esse dia (9h30 → 10h30)')
+    pg.click('#reservar'); pg.wait_for_selector('#dlg[open]')
+    pg.fill('#dlgf [name=data]', amanha); pg.fill('#dlgf [name=hora]', '19:00'); pg.fill('#dlgf [name=ate]', mais3sem); pg.click('#dlgf button[value=ok]'); pg.wait_for_timeout(500)
+    ok(ev('criar')[-1]['evento']['recurrence'] == ['RRULE:FREQ=WEEKLY;UNTIL=' + mais3sem.replace('-', '') + 'T235959Z'], 'com data: toda semana até ela')
+    pg.click('#reservar'); pg.wait_for_selector('#dlg[open]')
+    pg.fill('#dlgf [name=hora]', '23:30'); n = len(ev('criar'))
     pg.click('#dlgf button[value=ok]'); pg.wait_for_timeout(400)
-    ok(len(ev('criar')) == n and 'depois do inicial' in pg.inner_text('#toast'), 'fim antes do início não cria a reserva')
+    ok(len(ev('criar')) == n and 'meia-noite' in pg.inner_text('#toast'), 'depois das 23h não cria (passaria da meia-noite)')
 
     # 4) compromissos antigos ligados ao cliente: pelo nome no título e pelo e-mail do convidado
     pg.evaluate(f"""window.__EV.eventos.push(

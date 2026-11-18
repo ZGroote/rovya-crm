@@ -575,25 +575,30 @@ async function novoEvento(val = {}, ev = null) {
 
 // períodos abertos para novos clientes: um evento "Reservado · novos clientes" (livre, crm_reserva=1) na agenda profissional;
 // a página rovyacreative.com.br/agendar divide em conversas de crm_slot minutos e mostra só o que não bate com nada da agenda
+// cada reserva é UMA conversa de 1 hora (14:00 → 15:00). Sem data de repetição, repete toda semana até ela tirar
+// (o site só mostra os próximos 45 dias; quando alguém marca, aquele dia sai sozinho porque a reunião ocupa o horário).
+const DURACAO_CONVERSA = 60;
 async function reservarHorarios() {
-  const v = await formulario('Reservar horários para novos clientes', [
-    { k: 'data', l: 'Dia', t: 'date', req: true, meia: true }, { k: 'dur', l: 'Cada conversa (min)', t: 'number', meia: true },
-    { k: 'ini', l: 'Das', t: 'time', req: true, meia: true }, { k: 'fim', l: 'Até', t: 'time', req: true, meia: true },
-    { k: 'ate', l: 'Repetir toda semana até (vazio = só esse dia)', t: 'date' }],
-    { data: hoje(), ini: '14:00', fim: '18:00', dur: 60 },
-    `<p class="mute" style="margin:0">Esses horários aparecem em <b>rovyacreative.com.br/agendar</b>. Quem agenda recebe o convite com o link do Meet. O que já estiver marcado na sua agenda (profissional ou pessoal) não aparece para ninguém.</p>`, 'Reservar');
+  const v = await formulario('Reservar horário para novos clientes', [
+    { k: 'data', l: 'Dia', t: 'date', req: true, meia: true }, { k: 'hora', l: 'Horário (a conversa dura 1 hora)', t: 'time', req: true, meia: true },
+    { k: 'ate', l: 'Repetir toda semana até (vazio = toda semana, até você tirar)', t: 'date' }],
+    { data: hoje(), hora: '14:00' },
+    `<p class="mute" style="margin:0">Aparece em <b>rovyacreative.com.br/agendar</b>. Quem agenda recebe o convite com o link do Meet, e aquele dia sai sozinho do site. O que já estiver na sua agenda (profissional ou pessoal) não aparece para ninguém. Para abrir <b>só este dia</b>, coloque o mesmo dia na repetição.</p>`, 'Reservar');
   if (!v) return false;
-  if (v.fim <= v.ini) { toast('O horário final precisa ser depois do inicial.', true); return false; }
+  const [h, m] = v.hora.split(':').map(Number), fimMin = h * 60 + m + DURACAO_CONVERSA;
+  if (fimMin > 24 * 60) { toast('A conversa precisa acabar até meia-noite: escolha até 23:00.', true); return false; }
   if (v.ate && v.ate < v.data) { toast('A data de repetição precisa ser depois do dia escolhido.', true); return false; }
-  const tz = 'America/Sao_Paulo', dur = Math.max(15, v.dur || 60);
+  const tz = 'America/Sao_Paulo', hm = x => `${String(Math.floor(x / 60) % 24).padStart(2, '0')}:${String(x % 60).padStart(2, '0')}`;
+  const dataFim = fimMin === 24 * 60 ? new Date(new Date(v.data + 'T12:00:00').getTime() + 864e5).toLocaleDateString('sv') : v.data;
   const evento = { summary: 'Reservado · novos clientes', transparency: 'transparent',
     description: 'Horário aberto para novos clientes agendarem pelo site (rovyacreative.com.br/agendar). Criado pelo CRM.',
-    start: { dateTime: `${v.data}T${v.ini}:00`, timeZone: tz }, end: { dateTime: `${v.data}T${v.fim}:00`, timeZone: tz },
-    extendedProperties: { private: { crm_reserva: '1', crm_slot: String(dur) } } };
-  if (v.ate) evento.recurrence = [`RRULE:FREQ=WEEKLY;UNTIL=${v.ate.replace(/-/g, '')}T235959Z`];
+    start: { dateTime: `${v.data}T${v.hora}:00`, timeZone: tz }, end: { dateTime: `${dataFim}T${hm(fimMin)}:00`, timeZone: tz },
+    extendedProperties: { private: { crm_reserva: '1', crm_slot: String(DURACAO_CONVERSA) } } };
+  if (!v.ate) evento.recurrence = ['RRULE:FREQ=WEEKLY'];
+  else if (v.ate > v.data) evento.recurrence = [`RRULE:FREQ=WEEKLY;UNTIL=${v.ate.replace(/-/g, '')}T235959Z`];
   try { await google('criar', { evento, agenda: 'profissional' }); }
   catch (e) { toast(semRede(e) ? 'Sem internet: reservar horários precisa de conexão.' : e.message, true); return false; }
-  toast('Horários reservados: já aparecem na agenda do site.'); return true;
+  toast(`Reservado ${v.hora}–${hm(fimMin)}${!v.ate ? ', toda semana' : v.ate > v.data ? ' toda semana até ' + dataBR(v.ate) : ''}: já aparece na agenda do site.`); return true;
 }
 async function verReserva(e) {
   const ini = new Date(e.start.dateTime), fim = new Date(e.end.dateTime), h = d => d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
