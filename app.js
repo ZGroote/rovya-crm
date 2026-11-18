@@ -750,15 +750,13 @@ const gravarChat = m => { try { localStorage.setItem(chaveChat(), JSON.stringify
 // negrito e listas simples nas respostas da IA
 const fmtIA = t => esc(t).replace(/\*\*(.+?)\*\*/g, '<b>$1</b>').replace(/^#{1,4}\s*(.+)$/gm, '<b>$1</b>').replace(/\n/g, '<br>');
 
-async function assistente() {
+// a conversa (a mesma na tela Assistente e na janelinha da Sabrina do canto: as duas leem e gravam o chat do dia)
+function montarChat(alvo, sugestoes) {
   let msgs = lerChat();
-  main.innerHTML = `<div class="topo"><div><div class="eyebrow">Sua assistente</div><h1>Assistente</h1><p>Pergunte sobre clientes, projetos, prazos, agenda e dinheiro.</p></div>
-    <div class="acoes" id="avisos"></div></div>
-    <section class="chat card"><div class="msgs" id="msgs"></div>
-      <form class="enviar" id="fChat"><textarea id="pergunta" rows="1" placeholder="Pergunte algo… (ex.: o que falta na Conecta?)"></textarea><button class="bt" id="bEnviar">Enviar</button></form>
-      <div class="sugestoes">${['O que é prioridade hoje?', 'Quanto tenho a receber este mês?', 'Quem está sem resposta há mais tempo?', 'Como está cada projeto?'].map(s => `<button type="button" class="bt peq sec">${s}</button>`).join('')}</div>
-    </section>`;
-  const caixa = $('#msgs');
+  alvo.innerHTML = `<div class="msgs" aria-live="polite"></div>
+    <form class="enviar"><textarea rows="1" placeholder="${sugestoes ? 'Pergunte algo… (ex.: o que falta na Conecta?)' : 'Pergunte algo…'}" aria-label="Pergunta para a assistente"></textarea><button class="bt">Enviar</button></form>
+    ${sugestoes ? `<div class="sugestoes">${['O que é prioridade hoje?', 'Quanto tenho a receber este mês?', 'Quem está sem resposta há mais tempo?', 'Como está cada projeto?'].map(s => `<button type="button" class="bt peq sec">${s}</button>`).join('')}</div>` : ''}`;
+  const caixa = alvo.querySelector('.msgs'), form = alvo.querySelector('form'), campo = form.querySelector('textarea'), bt = form.querySelector('button');
   const desenhar = (pensando) => {
     caixa.innerHTML = msgs.filter(m => !m.oculta).map(m => `<div class="msg ${m.role === 'user' ? 'eu' : 'ia'}">${m.role === 'user' ? esc(m.content) : fmtIA(m.content)}</div>`).join('')
       + (pensando ? '<div class="msg ia pensando"><i></i><i></i><i></i></div>' : '');
@@ -766,19 +764,80 @@ async function assistente() {
   };
   const perguntar = async texto => {
     if (texto) msgs.push({ role: 'user', content: texto });
-    $('#bEnviar').disabled = true; desenhar(true);
+    bt.disabled = true; desenhar(true); poseSabrina('pensando');
     try {
       const { resposta } = await funcao('crm-assistente', 'chat', { mensagens: msgs.map(({ role, content }) => ({ role, content })) });
-      msgs.push({ role: 'assistant', content: resposta }); gravarChat(msgs);
-    } catch (e) { msgs.push({ role: 'assistant', content: '⚠️ ' + e.message }); }
-    $('#bEnviar') && ($('#bEnviar').disabled = false); desenhar();
+      msgs.push({ role: 'assistant', content: resposta }); gravarChat(msgs); poseSabrina('apresentando', 6);
+    } catch (e) { msgs.push({ role: 'assistant', content: '⚠️ ' + e.message }); poseSabrina('aceno'); }
+    bt.disabled = false; desenhar();
   };
   desenhar();
   if (!msgs.length) { msgs.push({ role: 'user', content: PEDIDO_RESUMO, oculta: true }); perguntar(); } // resumo do dia ao abrir
-  $('#fChat').onsubmit = e => { e.preventDefault(); const t = $('#pergunta').value.trim(); if (!t) return; $('#pergunta').value = ''; perguntar(t); };
-  $('#pergunta').onkeydown = e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); $('#fChat').requestSubmit(); } };
-  main.querySelectorAll('.sugestoes button').forEach(b => b.onclick = () => perguntar(b.textContent));
+  form.onsubmit = e => { e.preventDefault(); const t = campo.value.trim(); if (!t) return; campo.value = ''; perguntar(t); };
+  campo.onkeydown = e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); form.requestSubmit(); } };
+  alvo.querySelectorAll('.sugestoes button').forEach(b => b.onclick = () => perguntar(b.textContent));
+  return campo;
+}
+
+async function assistente() {
+  fecharSabrina();
+  main.innerHTML = `<div class="topo"><div class="topo-sab">${figuraSabrina()}<div><div class="eyebrow">Sua assistente</div><h1>Assistente</h1><p>Pergunte sobre clientes, projetos, prazos, agenda e dinheiro.</p></div></div>
+    <div class="acoes" id="avisos"></div></div>
+    <section class="chat card" id="chatPagina"></section>`;
+  animarSabrina(main);
+  montarChat($('#chatPagina'), true);
   avisoNotificacoes();
+}
+
+/* ---------- a Sabrina (o mesmo avatar do site, img/sabrina-*.webp|webm, fontes em 3d/poses/) ----------
+   No canto de todas as telas; ao tocar abre a conversa com a IA. Na tela Assistente ela fica no topo.
+   Pensa enquanto a IA responde e apresenta a resposta. */
+const POSES_SABRINA = ['oi', 'pensando', 'apresentando', 'cruzados', 'comemorando'];
+const figuraSabrina = () => '<span class="sab" aria-hidden="true"><img class="sab-base" src="img/sabrina-aceno.webp" alt="" width="148" height="160"><img class="sab-pose" alt="" width="148" height="160"></span>';
+let poseVolta;
+function poseSabrina(nome, segundos) {
+  clearTimeout(poseVolta);
+  document.querySelectorAll('.sab').forEach(s => {
+    if (!nome || nome === 'aceno') return s.classList.remove('com-pose');
+    s.querySelector('.sab-pose').src = `img/sabrina-${nome}.webp`; s.classList.remove('com-pose'); void s.offsetWidth; s.classList.add('com-pose');
+  });
+  if (segundos) poseVolta = setTimeout(() => poseSabrina('aceno'), segundos * 1000);
+}
+// acenando em vídeo com transparência onde funciona; no Safari (sem transparência em WebM) ela só flutua; com "menos movimento", parada
+function animarSabrina(raiz) {
+  const img = raiz.querySelector('.sab-base'); if (!img || matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  const safari = /^((?!chrome|chromium|android|crios|fxios|edg).)*safari/i.test(navigator.userAgent);
+  if (safari || !document.createElement('video').canPlayType('video/webm; codecs="vp9"')) return img.classList.add('sab-flutua');
+  const v = Object.assign(document.createElement('video'), { muted: true, loop: true, autoplay: true, playsInline: true, src: 'img/sabrina-aceno.webm', className: 'sab-base' });
+  v.disablePictureInPicture = true; v.setAttribute('aria-hidden', 'true');
+  v.addEventListener('playing', () => img.replaceWith(v), { once: true }); v.play().catch(() => img.classList.add('sab-flutua'));
+}
+let canto;
+function fecharSabrina() { canto?.classList.remove('aberta'); canto?.querySelector('.sab-bt').setAttribute('aria-expanded', 'false'); }
+function sabrinaNoCanto() {
+  if (COPIA_MODO || canto) return;   // o quadro invisível da cópia não precisa dela (nem gasta IA)
+  canto = document.createElement('div'); canto.className = 'sab-canto';
+  canto.innerHTML = `<div class="sab-jan card" id="sabJan" role="dialog" aria-label="Conversa com a assistente">
+      <div class="sab-topo"><img src="img/assistente-rosto.webp" alt=""><div><b>Assistente</b><small>IA com os dados do CRM</small></div>
+        <a class="bt peq sec" href="#/assistente" title="Abrir a tela da assistente">Tela cheia</a><button class="bt peq sec" type="button" data-fechar aria-label="Fechar conversa">✕</button></div>
+      <div class="chat" id="sabChat"></div></div>
+    <button class="sab-bt" type="button" aria-label="Conversar com a assistente" aria-expanded="false" aria-controls="sabJan">${figuraSabrina()}</button>`;
+  document.body.append(canto);
+  const bt = canto.querySelector('.sab-bt');
+  bt.onclick = () => {
+    if (canto.classList.toggle('aberta')) {
+      bt.setAttribute('aria-expanded', 'true'); POSES_SABRINA.forEach(p => { new Image().src = `img/sabrina-${p}.webp`; });
+      poseSabrina('oi', 3);
+      const campo = montarChat(canto.querySelector('#sabChat'), false);   // relê o chat do dia (pode ter mudado na tela Assistente); sem conversa, já pede o resumo e ela pensa
+      setTimeout(() => campo.focus({ preventScroll: true }), 300);
+    } else { bt.setAttribute('aria-expanded', 'false'); poseSabrina('aceno'); }
+  };
+  canto.querySelector('[data-fechar]').onclick = () => { fecharSabrina(); poseSabrina('aceno'); bt.focus(); };
+  canto.querySelector('a').onclick = fecharSabrina;
+  canto.addEventListener('keydown', e => { if (e.key === 'Escape' && canto.classList.contains('aberta')) { fecharSabrina(); bt.focus(); } });
+  const lugar = () => document.body.classList.toggle('na-assistente', /^#\/assistente/.test(location.hash));
+  addEventListener('hashchange', lugar); lugar();
+  setTimeout(() => animarSabrina(canto), 1500);
 }
 
 // notificações no celular (Web Push). No iPhone só funciona com o app instalado na tela de início.
@@ -870,5 +929,5 @@ if (COPIA_MODO) {
   setTimeout(() => { sincronizar(); enviarPendentes(); }, 3000);
   setTimeout(copiaCompleta, 10000); // depois da primeira tela, para não disputar com ela
   setInterval(() => { sincronizar(); enviarPendentes(); copiaCompleta(); }, 120000); // o evento "online" falha em alguns celulares
-  rotear();
+  rotear(); sabrinaNoCanto();
 }

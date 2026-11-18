@@ -103,6 +103,7 @@ window.fetch = (u, o) => {
     { nome: 'Paulo Mendes', email: 'PAULO@horizonte.com', telefone: '', empresa: '' }, { nome: 'Joana Prado', email: 'joana@prado.com', telefone: '+55 16 98888-1111', empresa: 'Prado Café' },
     { nome: 'Rui Costa', email: '', telefone: '(16) 97777-2222', empresa: '' }, { nome: 'Lia Souza', email: 'lia@souza.com', telefone: '', empresa: 'Souza Arquitetura' }] })));
   if (b.acao === 'email') return Promise.resolve(new Response(JSON.stringify({ ok: true })));
+  if (b.acao === 'chat') return new Promise(ok => setTimeout(ok, 600, new Response(JSON.stringify({ resposta: b.mensagens.length > 1 ? 'Você tem **R$ 2.000,00** a receber.' : '**Hoje:** 2 tarefas e 1 compromisso.' }))));
   return Promise.resolve(new Response('{}'));
 };
 """ % (json.dumps(D, ensure_ascii=False), json.dumps(EV, ensure_ascii=False))
