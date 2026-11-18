@@ -4,7 +4,7 @@ import { garantirEstrutura, subir, AREA_BACKUP } from './drive.js';
 
 // tabelas do backup (as de token/notificação ficam de fora: são segredo ou se refazem sozinhas)
 const TABELAS = ['crm_clientes', 'crm_oportunidades', 'crm_interacoes', 'crm_servicos', 'crm_propostas', 'crm_contratos', 'crm_projetos', 'crm_etapas',
-  'crm_entregas', 'crm_anexos', 'crm_tarefas', 'crm_parcelas', 'crm_modelos', 'crm_documentos', 'crm_drive'];
+  'crm_entregas', 'crm_anexos', 'crm_tarefas', 'crm_parcelas', 'crm_modelos', 'crm_documentos', 'crm_drive', 'crm_agendamentos'];
 const NOMES = { crm_clientes: 'Clientes', crm_oportunidades: 'Funil', crm_interacoes: 'Histórico', crm_servicos: 'Serviços', crm_propostas: 'Propostas',
   crm_contratos: 'Contratos', crm_projetos: 'Projetos', crm_etapas: 'Etapas', crm_entregas: 'Entregas', crm_anexos: 'Anexos', crm_tarefas: 'Tarefas',
   crm_parcelas: 'Financeiro', crm_modelos: 'Modelos', crm_documentos: 'Documentos', crm_drive: 'Drive' };

@@ -172,3 +172,12 @@ body.sem-rede #main::before{content:"Sem internet · mostrando os dados salvos n
 .avisos li{font-size:.92rem}
 @media (max-width:760px){#toast{bottom:calc(78px + env(safe-area-inset-bottom))}}
 .pill.pend{background:#b7791f1f;color:var(--warn)}
+/* agenda: profissional x pessoal x outras, reservas para novos clientes */
+.filtros{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px}
+.chip{font:inherit;font-size:.82rem;padding:5px 14px;border-radius:999px;border:1px solid var(--line);background:var(--card);color:var(--mute);cursor:pointer}
+.chip.ativo{border-color:var(--wine);color:var(--wine);font-weight:500}
+#agLista[data-filtro=profissional] .ev:not(.t-profissional),#agLista[data-filtro=pessoal] .ev:not(.t-pessoal){display:none}
+.ev.t-pessoal{background:#3f7a520d;border-left:3px solid var(--ok)}
+.ev.t-outra{opacity:.8}
+.ev.reserva{background:repeating-linear-gradient(135deg,transparent 0 8px,#b08a4a14 8px 16px);border-style:dashed;border-color:var(--gold)}
+.ev.reserva .h{color:var(--gold)}

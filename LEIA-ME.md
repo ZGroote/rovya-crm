@@ -32,16 +32,26 @@ Site estático (HTML + JS, sem build) com dados no Supabase, projeto **rovya-sti
 4. **Financeiro:** as parcelas são lançadas dentro do projeto (“Dividir em parcelas”). O botão **Recebi** dá baixa.
 5. **Modelos:** os textos usam `{{empresa}}`, `{{contato}}` e `{{cliente}}`. Para criar um modelo de projeto novo, abra um projeto e use Editar → “Salvar estrutura como modelo”.
 
-## Google Agenda (falta configurar)
+## Google (Agenda, Drive, Contatos, Gmail)
 
-1. Em console.cloud.google.com, crie um projeto (“Rovya CRM”) e ative a **Google Calendar API**.
-2. **Tela de consentimento OAuth:** escolha Externo, nome Rovya e o e-mail de suporte. Adicione o escopo `.../auth/calendar.events`. Depois clique em **Publicar app** (em produção). Em modo de teste, a autorização expira a cada 7 dias.
-3. Em **Credenciais**, crie um ID do cliente OAuth do tipo **Aplicativo da Web**, com este URI de redirecionamento:
-   `https://jgigosrsyxjqqhckudfe.supabase.co/functions/v1/crm-google`
-4. No Supabase (rovya-stickers), vá em **Edge Functions → Secrets** e crie `GOOGLE_CLIENT_ID` e `GOOGLE_CLIENT_SECRET`.
-5. No CRM, abra Agenda → **Conectar Google Agenda** e entre com a conta da Rovya. Como o app não é verificado pelo Google, aparece um aviso: clique em “Avançado → continuar”.
+Projeto **crm-sa-514601** no Google Cloud, app OAuth “Rovya CRM” **em produção** (sem verificação: aparece “app não verificado” → Avançado → Acessar).
+APIs ativadas: Calendar, Drive, Gmail, People. Os escopos não ficam declarados na tela de consentimento de propósito (declarar escopos sensíveis faz o Google exigir a verificação formal).
+Redirecionamento: `https://jgigosrsyxjqqhckudfe.supabase.co/functions/v1/crm-google`; secrets `GOOGLE_CLIENT_ID` e `GOOGLE_CLIENT_SECRET` no Supabase.
 
-Os compromissos criados pelo CRM vão direto para o Google Agenda e guardam o cliente em `extendedProperties.private.crm_cliente`. O Google é a fonte da verdade, então não há cópia para sincronizar.
+Escopos pedidos ao conectar (lista `ESCOPOS` em `crm-google`): `calendar.events`, `calendar.calendarlist.readonly`, `calendar.app.created`, `drive.file`, `contacts.readonly`, `gmail.send`. Os escopos aceitos ficam em `crm_google.escopos`; se faltar algum, a Agenda mostra **Reconectar Google**.
+
+- **Agendas:** o botão “Agendas” escolhe a **profissional** (padrão; recebe reuniões, reservas e agendamentos do site), a **pessoal** (pode ser criada pelo CRM) e outras só para ver. Fica em `crm_google.agendas`. O Google é a fonte da verdade: não há cópia para sincronizar.
+- **Ligação com clientes:** o CRM grava o cliente em `extendedProperties.private.crm_cliente`. Compromissos antigos são ligados na hora de mostrar, pelo e-mail de um convidado ou pelo nome/empresa (4+ letras) no título. A ficha do cliente busca os compromissos dele (2 anos para trás, 6 meses para frente).
+- **Meet e convite:** “Criar link do Meet” e “Convidar o cliente” no compromisso (o Google manda o convite e os lembretes).
+- **Gmail:** botão E-mail na ficha do cliente; sai da conta conectada, com anexos até 15 MB, e fica no histórico.
+- **Contatos:** Clientes → Importar do Google (só os que ainda não estão no CRM, pelo e-mail ou pelos últimos 9 dígitos do telefone).
+
+### Agenda pública (rovyacreative.com.br/agendar)
+
+A Sabrina marca na Agenda **Reservar horários**: um evento “Reservado · novos clientes” (livre, `crm_reserva=1`, `crm_slot` = minutos de cada conversa), que pode repetir toda semana.
+A página `site/agendar.html` chama a função **crm-agendar** (sem login): ela divide as reservas em conversas e tira o que bate com qualquer compromisso das agendas profissional e pessoal (só devolve início e fim, nunca o que há na agenda).
+Ao reservar: trava o horário em `crm_agendamentos` (índice único), acha ou cadastra o cliente (origem “Agenda do site”), cria a reunião com Meet e convite na agenda profissional, registra no histórico, abre a oportunidade e avisa no celular (pela `crm-assistente`, com a `cron_key`).
+Regras fixas no código: 12 h de antecedência, até 45 dias para frente, 3 agendamentos por dia do mesmo IP, 2 futuros por e-mail.
 
 ## Publicar online
 
@@ -51,7 +61,7 @@ Qualquer hospedagem estática serve (GitHub Pages, como as figurinhas). Depois d
 
 `python -m http.server 8777 --directory crm` e abra http://localhost:8777/login.html.
 
-**Testes automáticos** (navegador de verdade, dados de mentira): `python testes/rodar.py` roda todos; `python testes/rodar.py offline` roda só os que têm "offline" no nome. Precisa de `pip install playwright`, Google Chrome instalado e `supabase/002_seed.sql` no computador (fica fora do git). O `testes/mock.py` gera `_mock.html`, que finge o Supabase (`window.__D`), registra cada chamada (`window.__log`) e finge o Google Agenda, inclusive sem internet. Rode antes de publicar qualquer mudança. `teste_sessao_vencida_real.py` é o único que fala com o Supabase de verdade (só leitura, sem login).
+**Testes automáticos** (navegador de verdade, dados de mentira): `python testes/rodar.py` roda todos; `python testes/rodar.py offline` roda só os que têm "offline" no nome. Precisa de `pip install playwright`, Google Chrome instalado e `supabase/002_seed.sql` no computador (fica fora do git). O `testes/mock.py` gera `_mock.html`, que finge o Supabase (`window.__D`), registra cada chamada (`window.__log`) e finge o Google Agenda, inclusive sem internet. Os `teste_*.mjs` rodam as funções do Supabase no Node, com Google e banco de mentira (ex.: a conta dos horários livres da agenda pública). Rode antes de publicar qualquer mudança. `teste_sessao_vencida_real.py` é o único que fala com o Supabase de verdade (só leitura, sem login).
 
 ## Assistente (IA) e notificações — falta a chave do Gemini
 

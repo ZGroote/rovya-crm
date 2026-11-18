@@ -143,13 +143,13 @@ async function servidorPush() {
   return { app, publica: await webpush.exportApplicationServerKey(chaves) };
 }
 
-async function notificar(titulo: string, corpo: string) {
+async function notificar(titulo: string, corpo: string, url = '#/assistente') {
   const { app } = await servidorPush();
   const { data: subs } = await db.from('crm_push').select('endpoint,inscricao');
   let ok = 0, removidas = 0;
   for (const s of subs ?? []) {
     try {
-      await app.subscribe(s.inscricao).pushTextMessage(JSON.stringify({ title: titulo, body: corpo, url: APP + '#/assistente' }), {});
+      await app.subscribe(s.inscricao).pushTextMessage(JSON.stringify({ title: titulo, body: corpo, url: APP + url }), {});
       ok++;
     } catch (e) {
       const st = (e as any)?.response?.status;
@@ -178,6 +178,9 @@ Deno.serve(async req => {
     if (cron) {
       const { data } = await db.from('crm_config').select('valor').eq('chave', 'cron_key').maybeSingle();
       if (!data?.valor || cron !== data.valor) return json({ erro: 'Sem permissão' }, 401);
+      // aviso avulso de outra função (ex.: crm-agendar quando alguém marca pelo site); sem aviso, é o resumo das 7h30
+      const { aviso } = await req.json().catch(() => ({}));
+      if (aviso?.titulo) return json(await notificar(String(aviso.titulo).slice(0, 80), String(aviso.corpo || '').slice(0, 200), String(aviso.url || '').startsWith('app.html#/') ? String(aviso.url).slice(8) : '#/agenda'));
       return json(await notificar('Bom dia, Sabrina! ☀️', resumoCurto(await retrato())));
     }
     if (!await eAdmin(req)) return json({ erro: 'Sem permissão' }, 401);

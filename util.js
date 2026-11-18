@@ -148,7 +148,7 @@ export function formulario(titulo, campos, val = {}, extra = '', botao = 'Salvar
 export const confirma = async msg => (await formulario(msg, [], {}, '', 'Confirmar')) !== null;
 
 /* ---------- dados compartilhados ---------- */
-export const listaClientes = () => q(sb.from('crm_clientes').select('id,codigo,nome,empresa').order('nome'));
+export const listaClientes = () => q(sb.from('crm_clientes').select('id,codigo,nome,empresa,email').order('nome'));
 export const opcoesClientes = cs => cs.map(c => [c.id, (c.codigo ? c.codigo + ' · ' : '') + c.nome + (c.empresa ? ` · ${c.empresa}` : '')]);
 
 // chama uma Edge Function do Supabase com o login atual

@@ -1,6 +1,7 @@
-// Ponte CRM <-> Google (Agenda + Drive) da Rovya.
-// POST (com o login da admin): {acao:'url'|'listar'|'criar'|'editar'|'apagar'|'desconectar'|'token', ...}
-// 'token' devolve um access token de 1 h (escopos calendar.events + drive.file) para o navegador falar direto com o Drive.
+// Ponte CRM <-> Google (Agenda, Drive, Contatos, Gmail) da Rovya.
+// POST (com o login da admin): {acao:'url'|'listar'|'criar'|'editar'|'apagar'|'desconectar'|'token'|'agendas'|'salvar_agendas'|'criar_agenda'|'contatos'|'email', ...}
+// 'token' devolve um access token de 1 h para o navegador falar direto com o Drive.
+// Agendas: 'profissional' (padrão, recebe as reuniões e os agendamentos do site), 'pessoal' e outras só para ver (crm_google.agendas).
 // GET: volta do consentimento do Google (?code&state), guarda o refresh token e redireciona para o CRM.
 // Deploy com verify_jwt = false (o GET vem do Google sem login); o POST confere o login aqui dentro.
 import { createClient } from 'jsr:@supabase/supabase-js@2';
@@ -8,7 +9,10 @@ import { createClient } from 'jsr:@supabase/supabase-js@2';
 const SUPA = Deno.env.get('SUPABASE_URL')!, SR = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 const CID = Deno.env.get('GOOGLE_CLIENT_ID') ?? '', CSEC = Deno.env.get('GOOGLE_CLIENT_SECRET') ?? '';
 const REDIRECT = `${SUPA}/functions/v1/crm-google`;
-const CAL = 'https://www.googleapis.com/calendar/v3/calendars/primary/events';
+const CALS = 'https://www.googleapis.com/calendar/v3';
+const evUrl = (cal: string) => `${CALS}/calendars/${encodeURIComponent(cal)}/events`;
+// escopos pedidos ao conectar; quem conectou antes de algum deles aparece com "Reconectar" no CRM
+const ESCOPOS = ['calendar.events', 'calendar.calendarlist.readonly', 'calendar.app.created', 'drive.file', 'contacts.readonly', 'gmail.send'];
 const db = createClient(SUPA, SR, { auth: { persistSession: false } });
 
 const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization, content-type, apikey, x-client-info', 'Access-Control-Allow-Methods': 'POST, GET, OPTIONS' };
@@ -34,20 +38,32 @@ async function eAdmin(req: Request) {
 }
 
 async function tokenGoogle() {
-  const { data } = await db.from('crm_google').select('email,refresh_token').eq('id', 1).maybeSingle();
+  const { data } = await db.from('crm_google').select('email,refresh_token,agendas,escopos').eq('id', 1).maybeSingle();
   if (!data?.refresh_token) return null;
   const r = await fetch('https://oauth2.googleapis.com/token', { method: 'POST',
     body: new URLSearchParams({ client_id: CID, client_secret: CSEC, refresh_token: data.refresh_token, grant_type: 'refresh_token' }) });
   const j = await r.json();
   if (!r.ok) { if (j.error === 'invalid_grant') await db.from('crm_google').delete().eq('id', 1); return null; } // autorização revogada: pede de novo
-  return { token: j.access_token as string, email: data.email as string };
+  const a = data.agendas ?? {};
+  return { token: j.access_token as string, email: data.email as string, escopos: String(data.escopos ?? ''),
+    agendas: { profissional: a.profissional || 'primary', pessoal: a.pessoal || null, mostrar: (a.mostrar || []) as string[] } };
+}
+const erroGoogle = (j: any) => /insufficient|scope/i.test(j?.error?.message || '') ? 'O Google ainda não deu essa permissão. Em Agenda, clique em “Reconectar Google” e permita tudo.' : (j?.error?.message || 'Erro no Google');
+// e-mail (Gmail): cabeçalho com acento vai em base64 (RFC 2047); corpo e anexos em base64 com linhas de 76
+const cab = (s: string) => '=?UTF-8?B?' + btoa(unescape(encodeURIComponent(s))) + '?=';
+const linhas76 = (s: string) => s.replace(/.{76}/g, '$&\r\n');
+function montarEmail(para: string, assunto: string, texto: string, anexos: { nome: string, tipo: string, base64: string }[]) {
+  const f = 'rovya' + crypto.randomUUID().replace(/-/g, '');
+  const partes = [`Content-Type: text/plain; charset=UTF-8\r\nContent-Transfer-Encoding: base64\r\n\r\n${linhas76(btoa(unescape(encodeURIComponent(texto))))}`,
+    ...anexos.map(a => `Content-Type: ${String(a.tipo || 'application/octet-stream').replace(/[^\w.+\/-]/g, '')}; name="${cab(a.nome)}"\r\nContent-Disposition: attachment; filename="${cab(a.nome)}"\r\nContent-Transfer-Encoding: base64\r\n\r\n${linhas76(String(a.base64).replace(/[^A-Za-z0-9+\/=]/g, ''))}`)];
+  return `To: ${para}\r\nSubject: ${cab(assunto)}\r\nMIME-Version: 1.0\r\nContent-Type: multipart/mixed; boundary="${f}"\r\n\r\n` + partes.map(p => `--${f}\r\n${p}\r\n`).join('') + `--${f}--`;
 }
 
 // Backup semanal (pg_cron, 014_backup.sql): todas as tabelas do CRM num JSON na pasta "15 — Tecnologia e Sistemas".
 // Mesma lista e formato do backup manual (configuracoes.js), então o roteiro de restauração do LEIA-ME vale para os dois.
 // Guarda os 12 automáticos mais recentes; os anteriores vão para a lixeira do Drive (recuperáveis por 30 dias).
 const TABELAS = ['crm_clientes', 'crm_oportunidades', 'crm_interacoes', 'crm_servicos', 'crm_propostas', 'crm_contratos', 'crm_projetos', 'crm_etapas',
-  'crm_entregas', 'crm_anexos', 'crm_tarefas', 'crm_parcelas', 'crm_modelos', 'crm_documentos', 'crm_drive'];
+  'crm_entregas', 'crm_anexos', 'crm_tarefas', 'crm_parcelas', 'crm_modelos', 'crm_documentos', 'crm_drive', 'crm_agendamentos'];
 const MANTER = 12, DRIVE = 'https://www.googleapis.com/drive/v3/files';
 async function backupSemanal() {
   const falha = async (m: string) => { await db.from('crm_falhas').insert({ origem: 'backup', acao: 'backup semanal', mensagem: m }); return { ok: false, erro: m }; };
@@ -97,8 +113,8 @@ Deno.serve(async req => {
       body: new URLSearchParams({ code, client_id: CID, client_secret: CSEC, redirect_uri: REDIRECT, grant_type: 'authorization_code' }) });
     const j = await r.json();
     if (!r.ok || !j.refresh_token) return new Response('O Google não autorizou: ' + (j.error_description || j.error || 'sem refresh token'), { status: 400 });
-    const cal = await (await fetch(CAL + '?maxResults=1', { headers: { Authorization: 'Bearer ' + j.access_token } })).json();
-    await db.from('crm_google').upsert({ id: 1, email: cal.summary ?? null, refresh_token: j.refresh_token, conectado_em: new Date().toISOString() });
+    const cal = await (await fetch(evUrl('primary') + '?maxResults=1', { headers: { Authorization: 'Bearer ' + j.access_token } })).json();
+    await db.from('crm_google').upsert({ id: 1, email: cal.summary ?? null, refresh_token: j.refresh_token, escopos: j.scope ?? null, conectado_em: new Date().toISOString() });
     return Response.redirect(deb64(volta64), 302);
   }
 
@@ -120,7 +136,7 @@ Deno.serve(async req => {
     const state = `${v}.${exp}.${await assina(`${v}.${exp}`)}`;
     return json({ url: 'https://accounts.google.com/o/oauth2/v2/auth?' + new URLSearchParams({
       client_id: CID, redirect_uri: REDIRECT, response_type: 'code', access_type: 'offline', prompt: 'consent', state,
-      scope: 'https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/drive.file' }) });
+      scope: ESCOPOS.map(e => 'https://www.googleapis.com/auth/' + e).join(' ') }) });
   }
   if (b.acao === 'desconectar') {
     const { data } = await db.from('crm_google').select('refresh_token').eq('id', 1).maybeSingle();
@@ -131,8 +147,13 @@ Deno.serve(async req => {
 
   const t = await tokenGoogle();
   if (!t) return json({ conectado: false });
-  const g = (path: string, init: RequestInit = {}) => fetch(CAL + path, { ...init, headers: { Authorization: 'Bearer ' + t.token, 'Content-Type': 'application/json' } });
-  const repassa = async (r: Response) => r.status === 204 ? json({ ok: true }) : r.ok ? json(await r.json()) : json({ erro: (await r.json()).error?.message || 'Erro no Google' }, 502);
+  const auth = { Authorization: 'Bearer ' + t.token, 'Content-Type': 'application/json' };
+  const faltam = ESCOPOS.filter(e => !t.escopos.includes('auth/' + e));
+  // 'profissional' / 'pessoal' viram o id da agenda escolhida; sem nada, vai para a profissional
+  const agenda = (x: unknown) => x === 'pessoal' ? (t.agendas.pessoal || t.agendas.profissional) : (!x || x === 'profissional') ? t.agendas.profissional : String(x);
+  const repassa = async (r: Response) => r.status === 204 ? json({ ok: true }) : r.ok ? json(await r.json()) : json({ erro: erroGoogle(await r.json().catch(() => ({}))) }, 502);
+  // Meet precisa de conferenceDataVersion=1; com convidados, o Google manda o convite/atualização por e-mail
+  const extras = (ev: any = {}) => '?' + new URLSearchParams({ conferenceDataVersion: '1', sendUpdates: ev.attendees?.length ? 'all' : 'none' });
 
   switch (b.acao) {
     case 'token': { // drive.file só enxerga o que o CRM criou; o token vale 1 h
@@ -140,13 +161,67 @@ Deno.serve(async req => {
       return json({ token: t.token, email: t.email, drive: String(info.scope || '').includes('drive.file') });
     }
     case 'listar': {
-      const r = await g('?' + new URLSearchParams({ timeMin: new Date(b.de).toISOString(), timeMax: new Date(b.ate).toISOString(), singleEvents: 'true', orderBy: 'startTime', maxResults: '250' }));
-      const j = await r.json();
-      return r.ok ? json({ conectado: true, email: t.email, eventos: j.items ?? [] }) : json({ erro: j.error?.message }, 502);
+      const a = t.agendas;
+      const lista: [string, string][] = [['profissional', a.profissional], ...(a.pessoal ? [['pessoal', a.pessoal] as [string, string]] : []),
+        ...a.mostrar.filter(id => id !== a.profissional && id !== a.pessoal).map(id => ['outra', id] as [string, string])];
+      const p = new URLSearchParams({ timeMin: new Date(b.de).toISOString(), timeMax: new Date(b.ate).toISOString(), singleEvents: 'true', orderBy: 'startTime', maxResults: '250' });
+      if (b.q) p.set('q', String(b.q));
+      if (b.prop) p.set('privateExtendedProperty', String(b.prop));
+      let erro = '';
+      const partes = await Promise.all(lista.map(async ([tipo, id]) => {
+        const r = await fetch(evUrl(id) + '?' + p, { headers: auth }); const j = await r.json().catch(() => ({}));
+        if (!r.ok) { if (tipo === 'profissional') erro = erroGoogle(j); return []; } // agenda extra que sumiu não derruba a tela
+        return (j.items ?? []).map((e: any) => ({ ...e, _tipo: tipo, _agenda: id }));
+      }));
+      if (erro) return json({ erro }, 502);
+      const quando = (e: any) => new Date(e.start?.dateTime || e.start?.date + 'T00:00:00-03:00').getTime();
+      return json({ conectado: true, email: t.email, faltam, temPessoal: !!a.pessoal, eventos: partes.flat().sort((x, y) => quando(x) - quando(y)) });
     }
-    case 'criar': return repassa(await g('', { method: 'POST', body: JSON.stringify(b.evento) }));
-    case 'editar': return repassa(await g('/' + encodeURIComponent(b.id), { method: 'PATCH', body: JSON.stringify(b.evento) }));
-    case 'apagar': return repassa(await g('/' + encodeURIComponent(b.id), { method: 'DELETE' }));
+    case 'criar': return repassa(await fetch(evUrl(agenda(b.agenda)) + extras(b.evento), { method: 'POST', headers: auth, body: JSON.stringify(b.evento) }));
+    case 'editar': return repassa(await fetch(evUrl(agenda(b.agenda)) + '/' + encodeURIComponent(b.id) + extras(b.evento), { method: 'PATCH', headers: auth, body: JSON.stringify(b.evento) }));
+    case 'apagar': return repassa(await fetch(evUrl(agenda(b.agenda)) + '/' + encodeURIComponent(b.id) + '?sendUpdates=all', { method: 'DELETE', headers: auth }));
+
+    case 'agendas': { // agendas da conta (para escolher profissional/pessoal/mostrar)
+      const r = await fetch(`${CALS}/users/me/calendarList?minAccessRole=reader`, { headers: auth }); const j = await r.json().catch(() => ({}));
+      if (!r.ok) return json({ erro: erroGoogle(j) }, 502);
+      return json({ faltam, config: t.agendas, lista: (j.items ?? []).map((c: any) => ({ id: c.id, nome: c.summaryOverride || c.summary, principal: !!c.primary, cor: c.backgroundColor, papel: c.accessRole })) });
+    }
+    case 'salvar_agendas': {
+      const a = b.agendas || {};
+      const agendas = { profissional: String(a.profissional || 'primary'), pessoal: a.pessoal ? String(a.pessoal) : null, mostrar: (Array.isArray(a.mostrar) ? a.mostrar : []).map(String).slice(0, 20) };
+      await db.from('crm_google').update({ agendas }).eq('id', 1);
+      return json({ ok: true, agendas });
+    }
+    case 'criar_agenda': {
+      const r = await fetch(`${CALS}/calendars`, { method: 'POST', headers: auth, body: JSON.stringify({ summary: String(b.nome || 'Pessoal').slice(0, 60), timeZone: 'America/Sao_Paulo' }) });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) return json({ erro: erroGoogle(j) }, 502);
+      return json({ id: j.id });
+    }
+
+    case 'contatos': { // Contatos do Google (People API), para importar como clientes
+      const todos: unknown[] = []; let pagina = '';
+      do {
+        const p = new URLSearchParams({ personFields: 'names,emailAddresses,phoneNumbers,organizations', pageSize: '1000' }); if (pagina) p.set('pageToken', pagina);
+        const r = await fetch('https://people.googleapis.com/v1/people/me/connections?' + p, { headers: auth }); const j = await r.json().catch(() => ({}));
+        if (!r.ok) return json({ erro: erroGoogle(j) }, 502);
+        for (const c of j.connections ?? []) {
+          const x = { nome: c.names?.[0]?.displayName || '', email: c.emailAddresses?.[0]?.value || '', telefone: c.phoneNumbers?.[0]?.value || '', empresa: c.organizations?.[0]?.name || '' };
+          if (x.nome || x.email) todos.push(x);
+        }
+        pagina = j.nextPageToken || '';
+      } while (pagina && todos.length < 5000);
+      return json({ contatos: todos });
+    }
+
+    case 'email': { // sai do Gmail da conta conectada
+      const para = String(b.para || '').trim();
+      if (!/^[^@\s,;<>]+@[^@\s,;<>]+\.[^@\s,;<>]+$/.test(para)) return json({ erro: 'E-mail do destinatário inválido.' }, 400);
+      const anexos = Array.isArray(b.anexos) ? b.anexos.slice(0, 10) : [];
+      const mime = montarEmail(para, String(b.assunto || '').replace(/[\r\n]+/g, ' ').slice(0, 300), String(b.texto || ''), anexos);
+      const r = await fetch('https://gmail.googleapis.com/upload/gmail/v1/users/me/messages/send?uploadType=media', { method: 'POST', headers: { Authorization: 'Bearer ' + t.token, 'Content-Type': 'message/rfc822' }, body: mime });
+      return r.ok ? json({ ok: true }) : json({ erro: erroGoogle(await r.json().catch(() => ({}))) }, 502);
+    }
   }
   return json({ erro: 'Ação desconhecida' }, 400);
 });

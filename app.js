@@ -208,7 +208,7 @@ async function funil() {
 async function clientes() {
   const cs = await q(sb.from('crm_clientes').select('*,crm_projetos(status),crm_oportunidades(etapa)').order('nome'));
   main.innerHTML = `<div class="topo"><div><div class="eyebrow">Relacionamento</div><h1>Clientes</h1></div>
-    <div class="acoes"><input class="busca" id="busca" placeholder="Buscar por nome, empresa, e-mail…" type="search"><button class="bt" id="nCli">+ Cliente</button></div></div>
+    <div class="acoes"><input class="busca" id="busca" placeholder="Buscar por nome, empresa, e-mail…" type="search"><button class="bt sec" id="impG">Importar do Google</button><button class="bt" id="nCli">+ Cliente</button></div></div>
     <div class="card"><table><thead><tr><th>Cliente</th><th class="esconde-cel">Contato</th><th>Situação</th></tr></thead><tbody id="tb"></tbody></table></div>`;
   const sit = c => c.crm_projetos.some(p => p.status === 'ativo') ? '<span class="pill p-aprovado">Projeto ativo</span>'
     : c.crm_oportunidades.some(o => !['ganho', 'perdido'].includes(o.etapa)) ? '<span class="pill p-produzindo">Em negociação</span>'
@@ -219,6 +219,7 @@ async function clientes() {
   desenha();
   $('#busca').oninput = e => desenha(e.target.value.toLowerCase().trim());
   $('#tb').onclick = e => { const tr = e.target.closest('tr[data-id]'); if (tr) location.hash = '#/cliente/' + tr.dataset.id; };
+  $('#impG').onclick = async () => { if (await importarContatos()) clientes(); };
   $('#nCli').onclick = async () => { const c = await novoCliente(); if (c) location.hash = '#/cliente/' + c.id; };
 }
 async function cliente(id) {
@@ -228,7 +229,7 @@ async function cliente(id) {
   if (!c) { main.innerHTML = '<p class="vazio">Cliente não encontrado.</p>'; return; }
   const zap = c.telefone ? 'https://wa.me/' + c.telefone.replace(/\D/g, '').replace(/^(?!55)/, '55') : null;
   main.innerHTML = `<div class="topo"><div><div class="eyebrow"><a href="#/clientes">Clientes</a>${c.codigo ? ' · ' + esc(c.codigo) : ''}</div><h1>${esc(c.nome)}</h1><p>${esc(c.empresa)}</p></div>
-    <div class="acoes">${zap ? `<a class="bt sec" href="${zap}" target="_blank" rel="noopener">WhatsApp</a>` : ''}${c.email ? `<a class="bt sec" href="mailto:${esc(c.email)}">E-mail</a>` : ''}
+    <div class="acoes">${zap ? `<a class="bt sec" href="${zap}" target="_blank" rel="noopener">WhatsApp</a>` : ''}${c.email ? '<button class="bt sec" id="emailG">E-mail</button>' : ''}
     <button class="bt sec" id="agendar">Agendar reunião</button><button class="bt sec" id="ed">Editar</button><button class="bt" id="nOp">+ Oportunidade</button></div></div>
   <div class="grade2">
     <section class="card"><h3>Dados</h3><ul class="lista">
@@ -239,6 +240,7 @@ async function cliente(id) {
     <section class="card"><h3>Oportunidades</h3><ul class="lista">${c.crm_oportunidades.map(o => `<li data-op="${o.id}" style="cursor:pointer"><div class="cresce"><b>${esc(o.titulo)}</b><small>${o.valor ? brl(o.valor) + ' · ' : ''}${esc(o.proximo_passo || '')}</small></div><span class="pill">${rotulo(ETAPAS_FUNIL, o.etapa)}</span></li>`).join('') || '<li class="vazio">Nenhuma oportunidade.</li>'}</ul></section>
     <section class="card"><h3>Histórico</h3><ul class="lista">${c.crm_interacoes.slice(0, 15).map(x => `<li data-hist="${x.id}" style="cursor:pointer;align-items:flex-start"><span class="pill">${rotulo(TIPOS_CONTATO, x.tipo)}</span><div class="cresce"><small style="white-space:pre-wrap;color:var(--ink)">${esc(x.resumo)}</small></div>${x._pendente ? '<span class="pill pend" title="Guardado neste aparelho; vai para o banco quando a internet voltar">⏳</span>' : ''}<span class="mute">${dataBR(x.data)}</span></li>`).join('') || '<li class="vazio">Nenhum contato registrado.</li>'}</ul>
       <button class="bt peq sec" id="nHist">+ Registrar contato</button></section>
+    <section class="card" id="cEventos"><h3>Compromissos</h3><p class="vazio">Carregando…</p></section>
     <section class="card"><h3>Onboarding</h3>${c.onboarding ? `<p class="mute" style="margin:0 0 6px">${c.onboarding.filter(i => i.feito).length} de ${c.onboarding.length} feitos</p>
       <ul class="lista">${c.onboarding.map((i, n) => `<li><label style="display:flex;gap:10px;align-items:center;cursor:pointer;flex:1${i.feito ? ';color:var(--mute);text-decoration:line-through' : ''}"><input type="checkbox" data-onb="${n}" ${i.feito ? 'checked' : ''}> ${esc(i.item)}</label></li>`).join('')}</ul>
       <button class="bt peq fantasma" id="onbItem">+ Item</button>`
@@ -261,7 +263,9 @@ async function cliente(id) {
   };
   $('#nOp').onclick = async () => { if (await novaOportunidade(id)) cliente(id); };
   $('#nProj').onclick = async () => { await criarProjeto(id, c.empresa || c.nome); };
-  $('#agendar').onclick = () => novoEvento({ cliente_id: id, titulo: 'Reunião · ' + (c.empresa || c.nome) });
+  $('#agendar').onclick = async () => { if (await novoEvento({ cliente_id: id, titulo: 'Reunião · ' + (c.empresa || c.nome), meet: '1', convidar: c.email ? '1' : '' })) compromissosDoCliente(c); };
+  if ($('#emailG')) $('#emailG').onclick = async () => { if (await enviarEmail(c)) cliente(id); };
+  compromissosDoCliente(c); // não bloqueia a tela
   main.querySelectorAll('[data-op]').forEach(li => li.onclick = async () => { await editarOportunidade(c.crm_oportunidades.find(o => o.id === li.dataset.op)); cliente(id); });
 }
 
@@ -462,6 +466,16 @@ document.addEventListener('click', e => { if (e.target.id === 'copiar') { naviga
 /* ---------- AGENDA (Google, pela Edge Function crm-google) ---------- */
 const google = (acao, dados) => funcao('crm-google', acao, dados);
 const horaEv = e => e.start?.dateTime ? new Date(e.start.dateTime).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : 'dia todo';
+const reserva = e => e.extendedProperties?.private?.crm_reserva === '1';
+const LINK_AGENDA = 'https://rovyacreative.com.br/agendar';
+let TEM_PESSOAL = false; // vem da última leitura da agenda: sem agenda pessoal escolhida, o formulário nem pergunta
+// compromisso que não foi marcado pelo CRM: liga ao cliente pelo e-mail de um convidado ou pelo nome/empresa no título
+const normal = s => ' ' + (s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, ' ') + ' ';
+function clienteDoEvento(e, cs) {
+  const id = e.extendedProperties?.private?.crm_cliente; if (id && cs[id]) return cs[id];
+  const emails = (e.attendees || []).map(a => (a.email || '').toLowerCase()), tit = normal(e.summary);
+  return Object.values(cs).find(c => (c.email && emails.includes(c.email.toLowerCase())) || [c.empresa, c.nome].some(n => n && n.trim().length >= 4 && tit.includes(normal(n))));
+}
 
 /* compromisso criado sem internet fica guardado neste aparelho e vai para o Google quando a conexão voltar.
    Se ao enviar o horário já estiver ocupado no Google, ele é criado mesmo assim (nada se perde) e vira um aviso para a Sabrina. */
@@ -470,8 +484,8 @@ const lerFila = () => { try { return JSON.parse(localStorage.getItem(FILA)) || [
 const gravarFila = f => localStorage.setItem(FILA, JSON.stringify(f)); // pode lançar (aparelho sem espaço): quem chama avisa
 const idEvento = () => 'crm' + Date.now().toString(32) + Math.random().toString(32).slice(2, 8); // formato que o Google aceita; reenviar não duplica
 const quandoEv = ev => new Date(ev.start.dateTime).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
-function guardarPendente(evento) {
-  try { gravarFila([...lerFila().filter(p => p.evento.id !== evento.id), { evento, guardado_em: new Date().toISOString() }]); }
+function guardarPendente(evento, agenda = 'profissional') {
+  try { gravarFila([...lerFila().filter(p => p.evento.id !== evento.id), { evento, agenda, guardado_em: new Date().toISOString() }]); }
   catch { toast('Não consegui guardar neste aparelho (sem espaço?). Anote o compromisso e tente de novo.', true); return false; }
   toast('Sem internet: guardado neste aparelho. Vai para o Google quando a conexão voltar.'); return true;
 }
@@ -483,7 +497,7 @@ function enviarPendentes() {
 async function enviarFila() {
   let enviados = 0, conflitos = 0;
   const marcar = (id, erro) => { try { gravarFila(lerFila().map(p => p.evento.id === id ? { ...p, erro } : p)); } catch { } };
-  for (const { evento, erro: erroAntes } of lerFila()) {
+  for (const { evento, agenda, erro: erroAntes } of lerFila()) {
     let r;
     try { r = await google('listar', { de: evento.start.dateTime, ate: evento.end.dateTime, fresco: true }); }
     catch (e) { if (semRede(e)) break; marcar(evento.id, e.message); continue; }
@@ -493,7 +507,7 @@ async function enviarFila() {
       marcar(evento.id, m); continue;
     }
     if (!r.eventos.some(e => e.id === evento.id)) { // já criado numa tentativa que perdeu a resposta? então não cria de novo
-      try { await google('criar', { evento }); }
+      try { await google('criar', { evento, agenda }); }
       catch (e) { if (semRede(e)) break; if (!/already exists/i.test(e.message)) { marcar(evento.id, e.message); continue; } }
     }
     const choque = r.eventos.filter(e => e.id !== evento.id && e.start?.dateTime && e.status !== 'cancelled' && e.transparency !== 'transparent');
@@ -511,19 +525,23 @@ async function enviarFila() {
 
 async function novoEvento(val = {}, ev = null) {
   const cs = await listaClientes().catch(() => []);
-  const v = await formulario(ev ? 'Editar compromisso' : 'Novo compromisso', [
-    { k: 'titulo', l: 'Título', req: true }, { k: 'cliente_id', l: 'Cliente (opcional)', t: 'select', o: [['', '—'], ...opcoesClientes(cs)] },
+  const campos = [{ k: 'titulo', l: 'Título', req: true }, { k: 'cliente_id', l: 'Cliente (opcional)', t: 'select', o: [['', '—'], ...opcoesClientes(cs)] },
     { k: 'data', l: 'Data', t: 'date', req: true, meia: true }, { k: 'hora', l: 'Início', t: 'time', req: true, meia: true },
-    { k: 'duracao', l: 'Duração (min)', t: 'number', meia: true }, { k: 'local', l: 'Local ou link', meia: true }, { k: 'notas', l: 'Notas', t: 'textarea', linhas: 3 }],
-    { data: hoje(), hora: '10:00', duracao: 60, ...val }, ev ? '<button class="bt fantasma" value="apagar" formnovalidate style="justify-self:start;color:var(--bad)">Apagar compromisso</button>' : '');
+    { k: 'duracao', l: 'Duração (min)', t: 'number', meia: true }, { k: 'local', l: 'Local ou link', meia: true }];
+  if (!ev && TEM_PESSOAL) campos.push({ k: 'agenda', l: 'Agenda', t: 'select', o: [['profissional', 'Profissional'], ['pessoal', 'Pessoal']], meia: true });
+  if (!ev?.hangoutLink) campos.push({ k: 'meet', l: 'Google Meet', t: 'select', o: [['', 'Sem link'], ['1', 'Criar link do Meet']], meia: true });
+  campos.push({ k: 'convidar', l: 'Convite por e-mail', t: 'select', o: [['', 'Não convidar'], ['1', 'Convidar o cliente (o Google manda o convite e os lembretes)']] },
+    { k: 'notas', l: 'Notas', t: 'textarea', linhas: 3 });
+  const v = await formulario(ev ? 'Editar compromisso' : 'Novo compromisso', campos,
+    { data: hoje(), hora: '10:00', duracao: 60, agenda: 'profissional', ...val }, ev ? '<button class="bt fantasma" value="apagar" formnovalidate style="justify-self:start;color:var(--bad)">Apagar compromisso</button>' : '');
   if ($('#dlg').returnValue === 'apagar') {
     if (ev.pendente) {
       if (!await confirma('Apagar este compromisso que ainda não foi para o Google?')) return false;
       try { gravarFila(lerFila().filter(p => p.evento.id !== ev.id)); } catch { }
       toast('Apagado'); return true;
     }
-    if (await confirma('Apagar do Google Agenda também?')) {
-      try { await google('apagar', { id: ev.id }); } catch (e) { toast(semRede(e) ? 'Sem internet: apagar um compromisso que já está no Google precisa de conexão.' : e.message, true); return false; }
+    if (await confirma(ev.attendees?.length ? 'Apagar do Google Agenda também? Os convidados recebem o aviso de cancelamento.' : 'Apagar do Google Agenda também?')) {
+      try { await google('apagar', { id: ev.id, agenda: ev._agenda }); } catch (e) { toast(semRede(e) ? 'Sem internet: apagar um compromisso que já está no Google precisa de conexão.' : e.message, true); return false; }
       toast('Apagado'); return true;
     }
     return false;
@@ -532,51 +550,197 @@ async function novoEvento(val = {}, ev = null) {
   const ini = new Date(`${v.data}T${v.hora}`), fim = new Date(ini.getTime() + (v.duracao || 60) * 6e4);
   const evento = { summary: v.titulo, location: v.local || undefined, description: v.notas || undefined, start: { dateTime: ini.toISOString() }, end: { dateTime: fim.toISOString() },
     extendedProperties: { private: { crm_cliente: v.cliente_id || '' } } };
-  if (ev?.pendente) { const ok = guardarPendente({ ...evento, id: ev.id }); enviarPendentes(); return ok; }
+  if (v.meet) evento.conferenceData = { createRequest: { requestId: idEvento(), conferenceSolutionKey: { type: 'hangoutsMeet' } } };
+  let semConvite = false;
+  if (v.convidar) {
+    const email = cs.find(c => c.id === v.cliente_id)?.email;
+    if (email) evento.attendees = [...(ev?.attendees || []).filter(a => a.email?.toLowerCase() !== email.toLowerCase()), { email }];
+    else semConvite = true;
+  }
+  const agenda = ev?._agenda || v.agenda || 'profissional';
+  const fimMsg = m => toast(semConvite ? m + ' · sem convite: escolha um cliente com e-mail' : m, semConvite);
+  if (ev?.pendente) { const ok = guardarPendente({ ...evento, id: ev.id }, agenda); enviarPendentes(); return ok; }
   if (!ev) evento.id = idEvento();
-  if (!ev && !navigator.onLine) return guardarPendente(evento);
-  try { await google(ev ? 'editar' : 'criar', { id: ev?.id, evento }); }
+  if (!ev && !navigator.onLine) return guardarPendente(evento, agenda);
+  try { await google(ev ? 'editar' : 'criar', { id: ev?.id, agenda, evento }); }
   catch (e) {
-    if (!ev && semRede(e)) return guardarPendente(evento);
+    if (!ev && semRede(e)) return guardarPendente(evento, agenda);
     toast(semRede(e) ? 'Sem internet: alterar um compromisso que já está no Google precisa de conexão.' : e.message, true); return false;
   }
-  toast(ev ? 'Compromisso atualizado' : 'Criado no Google Agenda'); return true;
+  fimMsg(ev ? 'Compromisso atualizado' : evento.attendees ? 'Criado no Google Agenda · convite enviado' : 'Criado no Google Agenda'); return true;
 }
+
+// períodos abertos para novos clientes: um evento "Reservado · novos clientes" (livre, crm_reserva=1) na agenda profissional;
+// a página rovyacreative.com.br/agendar divide em conversas de crm_slot minutos e mostra só o que não bate com nada da agenda
+async function reservarHorarios() {
+  const v = await formulario('Reservar horários para novos clientes', [
+    { k: 'data', l: 'Dia', t: 'date', req: true, meia: true }, { k: 'dur', l: 'Cada conversa (min)', t: 'number', meia: true },
+    { k: 'ini', l: 'Das', t: 'time', req: true, meia: true }, { k: 'fim', l: 'Até', t: 'time', req: true, meia: true },
+    { k: 'ate', l: 'Repetir toda semana até (vazio = só esse dia)', t: 'date' }],
+    { data: hoje(), ini: '14:00', fim: '18:00', dur: 60 },
+    `<p class="mute" style="margin:0">Esses horários aparecem em <b>rovyacreative.com.br/agendar</b>. Quem agenda recebe o convite com o link do Meet. O que já estiver marcado na sua agenda (profissional ou pessoal) não aparece para ninguém.</p>`, 'Reservar');
+  if (!v) return false;
+  if (v.fim <= v.ini) { toast('O horário final precisa ser depois do inicial.', true); return false; }
+  if (v.ate && v.ate < v.data) { toast('A data de repetição precisa ser depois do dia escolhido.', true); return false; }
+  const tz = 'America/Sao_Paulo', dur = Math.max(15, v.dur || 60);
+  const evento = { summary: 'Reservado · novos clientes', transparency: 'transparent',
+    description: 'Horário aberto para novos clientes agendarem pelo site (rovyacreative.com.br/agendar). Criado pelo CRM.',
+    start: { dateTime: `${v.data}T${v.ini}:00`, timeZone: tz }, end: { dateTime: `${v.data}T${v.fim}:00`, timeZone: tz },
+    extendedProperties: { private: { crm_reserva: '1', crm_slot: String(dur) } } };
+  if (v.ate) evento.recurrence = [`RRULE:FREQ=WEEKLY;UNTIL=${v.ate.replace(/-/g, '')}T235959Z`];
+  try { await google('criar', { evento, agenda: 'profissional' }); }
+  catch (e) { toast(semRede(e) ? 'Sem internet: reservar horários precisa de conexão.' : e.message, true); return false; }
+  toast('Horários reservados: já aparecem na agenda do site.'); return true;
+}
+async function verReserva(e) {
+  const ini = new Date(e.start.dateTime), fim = new Date(e.end.dateTime), h = d => d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+  await formulario(`Reservado para novos clientes · ${ini.toLocaleDateString('pt-BR')}, ${h(ini)}–${h(fim)}`, [], {},
+    `<p class="mute" style="margin:0">Conversas de ${esc(e.extendedProperties.private.crm_slot || '60')} min, agendadas pelo site. Quem já marcou continua marcado se você tirar a reserva.</p>
+     <button class="bt fantasma" value="um" style="justify-self:start;color:var(--bad)">Tirar só este dia</button>
+     ${e.recurringEventId ? '<button class="bt fantasma" value="todos" style="justify-self:start;color:var(--bad)">Tirar todas as semanas</button>' : ''}`, 'Fechar');
+  const rv = $('#dlg').returnValue;
+  if (rv !== 'um' && rv !== 'todos') return false;
+  try { await google('apagar', { id: rv === 'todos' ? e.recurringEventId : e.id, agenda: e._agenda }); }
+  catch (err) { toast(semRede(err) ? 'Sem internet: precisa de conexão.' : err.message, true); return false; }
+  toast('Reserva tirada'); return true;
+}
+
+// quais agendas do Google entram no CRM: profissional (recebe tudo do CRM e do site), pessoal e outras só para ver
+async function configurarAgendas() {
+  let r; try { r = await google('agendas'); } catch (e) { toast(semRede(e) ? 'Sem internet: precisa de conexão.' : e.message, true); return false; }
+  const op = c => [c.id, c.nome + (c.principal ? ' (principal)' : '')];
+  const gravaveis = r.lista.filter(c => ['owner', 'writer'].includes(c.papel));
+  const principal = r.lista.find(c => c.principal)?.id;
+  const campos = [
+    { k: 'profissional', l: 'Agenda profissional (reuniões, reservas e agendamentos do site)', t: 'select', o: gravaveis.map(op) },
+    { k: 'pessoal', l: 'Agenda pessoal (no site, só bloqueia o horário; ninguém vê o que é)', t: 'select', o: [['', '— nenhuma —'], ['+', '+ Criar agenda “Pessoal” no Google'], ...r.lista.map(op)] },
+    ...r.lista.map((c, i) => ({ k: 'm' + i, l: `Mostrar também “${c.nome}”`, t: 'select', o: [['', 'Não'], ['1', 'Sim']], meia: true }))];
+  const val = { profissional: r.config.profissional === 'primary' ? principal : r.config.profissional, pessoal: r.config.pessoal || '',
+    ...Object.fromEntries(r.lista.map((c, i) => ['m' + i, r.config.mostrar.includes(c.id) ? '1' : ''])) };
+  const v = await formulario('Agendas do Google', campos, val, '<p class="mute" style="margin:0">A profissional e a pessoal sempre aparecem; as outras (feriados, agendas compartilhadas) são só para ver.</p>');
+  if (!v) return false;
+  try {
+    let pessoal = v.pessoal;
+    if (pessoal === '+') pessoal = (await google('criar_agenda', { nome: 'Pessoal' })).id;
+    if (pessoal && pessoal === v.profissional) { toast('A pessoal precisa ser outra agenda, diferente da profissional.', true); return false; }
+    await google('salvar_agendas', { agendas: { profissional: v.profissional, pessoal: pessoal || null, mostrar: r.lista.filter((c, i) => v['m' + i]).map(c => c.id) } });
+  } catch (e) { toast(e.message, true); return false; }
+  toast('Agendas salvas'); return true;
+}
+
 async function agenda() {
-  main.innerHTML = `<div class="topo"><div><div class="eyebrow">Google Agenda</div><h1>Agenda</h1><p id="agSub">Carregando…</p></div><div class="acoes" id="agAcoes"></div></div><div id="agLista"></div>`;
+  main.innerHTML = `<div class="topo"><div><div class="eyebrow">Google Agenda</div><h1>Agenda</h1><p id="agSub">Carregando…</p></div><div class="acoes" id="agAcoes"></div></div>
+    <div id="agAviso"></div><div class="filtros" id="agFiltro"></div><div id="agLista"></div><div id="agSite"></div>`;
   const de = new Date(); de.setHours(0, 0, 0, 0); const ate = new Date(de.getTime() + 21 * 864e5);
-  const pend = lerFila().map(p => ({ ...p.evento, pendente: true, erro: p.erro }));
+  const pend = lerFila().map(p => ({ ...p.evento, pendente: true, erro: p.erro, _agenda: p.agenda || 'profissional', _tipo: p.agenda === 'pessoal' ? 'pessoal' : 'profissional' }));
   let r; try { r = await google('listar', { de: de.toISOString(), ate: ate.toISOString() }); }
   catch (e) { r = { falhou: semRede(e) ? 'Sem internet e sem cópia salva da agenda. Os compromissos marcados neste aparelho aparecem abaixo.' : e.message, eventos: [] }; }
+  const reconectar = async () => { const { url } = await google('url', { volta: location.href.split('#')[0] + '#/agenda' }); location.href = url; };
   if (r.conectado === false) {
     $('#agSub').textContent = 'Conecte a conta Google da Rovya para ver e criar compromissos daqui.';
     $('#agAcoes').innerHTML = '<button class="bt" id="con">Conectar Google Agenda</button>';
-    $('#con').onclick = async () => { const { url } = await google('url', { volta: location.href.split('#')[0] + '#/agenda' }); location.href = url; };
+    $('#con').onclick = reconectar;
     if (!pend.length) return;
     r.eventos = [];
   } else {
+    if (!r.falhou) TEM_PESSOAL = !!r.temPessoal;
     $('#agSub').textContent = r.falhou || (navigator.onLine ? `Conectada a ${r.email} · próximas 3 semanas` : 'Sem internet · agenda como estava na última vez que abriu com conexão');
-    $('#agAcoes').innerHTML = (r.falhou ? '' : '<button class="bt sec" id="desc">Desconectar</button>') + '<button class="bt" id="nEv">+ Compromisso</button>';
+    $('#agAcoes').innerHTML = (r.falhou ? '' : '<button class="bt sec" id="cfgAg">Agendas</button><button class="bt sec" id="desc">Desconectar</button><button class="bt sec" id="reservar">Reservar horários</button>') + '<button class="bt" id="nEv">+ Compromisso</button>';
+    if (r.faltam?.length) {
+      $('#agAviso').innerHTML = `<section class="card avisos"><p style="margin:0 0 10px">Para usar o <b>link do Meet</b>, os <b>convites por e-mail</b>, a <b>agenda pessoal</b> e as <b>outras agendas</b>, os <b>contatos</b> e o <b>Gmail</b>, reconecte o Google e marque “Permitir”.</p><button class="bt" id="recon">Reconectar Google</button></section>`;
+      $('#recon').onclick = reconectar;
+    }
+    $('#agSite').innerHTML = `<section class="card" style="margin-top:20px"><h3>Agenda do site</h3><p class="mute" style="margin:0 0 10px">Quem abre <a href="${LINK_AGENDA}" target="_blank" rel="noopener">rovyacreative.com.br/agendar</a> escolhe um horário livre dentro dos períodos reservados e recebe o convite com o Meet. O agendamento cai na agenda profissional, a pessoa vira cliente no CRM e você recebe um aviso no celular.</p><button class="bt peq sec" id="copiarAg">Copiar link</button></section>`;
+    $('#copiarAg').onclick = () => { navigator.clipboard.writeText(LINK_AGENDA); toast('Link copiado'); };
   }
   const cs = Object.fromEntries((await listaClientes().catch(() => [])).map(c => [c.id, c]));
   const evs = [...r.eventos.filter(e => !pend.some(p => p.id === e.id)), ...pend]
     .sort((a, b) => new Date(a.start.dateTime || a.start.date + 'T00:00') - new Date(b.start.dateTime || b.start.date + 'T00:00'));
+  if (evs.some(e => e._tipo === 'pessoal' || e._tipo === 'outra') || TEM_PESSOAL) {
+    $('#agFiltro').innerHTML = [['', 'Todas'], ['profissional', 'Profissional'], ['pessoal', 'Pessoal']].map(([k, l]) => `<button class="chip ${k === '' ? 'ativo' : ''}" data-filtro="${k}">${l}</button>`).join('');
+    $('#agFiltro').onclick = ev => {
+      const b = ev.target.closest('[data-filtro]'); if (!b) return;
+      $('#agFiltro').querySelectorAll('.chip').forEach(x => x.classList.toggle('ativo', x === b));
+      $('#agLista').dataset.filtro = b.dataset.filtro;
+    };
+  }
   const dias = {}; for (const e of evs) { const d = e.start.dateTime ? new Date(e.start.dateTime).toLocaleDateString('sv') : e.start.date; (dias[d] ||= []).push(e); }
   const dia = d => new Date(d + 'T12:00').toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' });
   $('#agLista').innerHTML = Object.entries(dias).map(([d, evs]) => `<section class="dia"><h3>${d === hoje() ? 'Hoje · ' : ''}${dia(d)}</h3>${evs.map(e => {
-    const cid = e.extendedProperties?.private?.crm_cliente, c = cs[cid];
-    return `<div class="ev ${c ? 'crm' : ''} ${e.pendente ? 'pendente' : ''}" data-ev="${esc(e.id)}"><span class="h">${horaEv(e)}</span><div><b>${esc(e.summary || '(sem título)')}</b>${c ? `<br><small class="mute">${esc(c.nome)}</small>` : ''}${e.location ? `<br><small class="mute">${esc(e.location)}</small>` : ''}${e.pendente ? `<br><small class="pend">${e.erro ? '⚠ Não enviado: ' + esc(e.erro) : '⏳ Guardado neste aparelho · vai para o Google quando a internet voltar'}</small>` : ''}</div></div>`;
+    const c = reserva(e) ? null : clienteDoEvento(e, cs), tipo = e._tipo || 'profissional';
+    const etiqueta = tipo === 'pessoal' ? '<span class="pill">Pessoal</span> ' : tipo === 'outra' ? `<span class="pill">${esc(e.organizer?.displayName || 'Outra agenda')}</span> ` : '';
+    return `<div class="ev t-${tipo} ${c ? 'crm' : ''} ${reserva(e) ? 'reserva' : ''} ${e.pendente ? 'pendente' : ''}" data-ev="${esc(e.id)}"><span class="h">${horaEv(e)}</span><div>${etiqueta}<b>${esc(e.summary || '(sem título)')}</b>${reserva(e) ? `<br><small class="mute">até ${horaEv({ start: e.end })} · aberto para agendamentos pelo site</small>` : ''}${c ? `<br><small class="mute">${esc(c.nome)}</small>` : ''}${e.location ? `<br><small class="mute">${esc(e.location)}</small>` : ''}${e.hangoutLink ? `<br><a class="mute" href="${esc(e.hangoutLink)}" target="_blank" rel="noopener" data-meet>Entrar no Meet ↗</a>` : ''}${e.pendente ? `<br><small class="pend">${e.erro ? '⚠ Não enviado: ' + esc(e.erro) : '⏳ Guardado neste aparelho · vai para o Google quando a internet voltar'}</small>` : ''}</div></div>`;
   }).join('')}</section>`).join('') || '<p class="vazio">Nenhum compromisso nas próximas 3 semanas.</p>';
   const porId = Object.fromEntries(evs.map(e => [e.id, e]));
-  main.querySelectorAll('[data-ev]').forEach(el => el.onclick = async () => {
+  main.querySelectorAll('[data-ev]').forEach(el => el.onclick = async ev => {
+    if (ev.target.closest('[data-meet]')) return;
     const e = porId[el.dataset.ev]; if (!e.start.dateTime) { window.open(e.htmlLink, '_blank'); return; }
+    if (reserva(e)) { if (await verReserva(e)) agenda(); return; }
     const ini = new Date(e.start.dateTime), fim = new Date(e.end.dateTime);
-    const ok = await novoEvento({ titulo: e.summary, cliente_id: e.extendedProperties?.private?.crm_cliente || '', data: ini.toLocaleDateString('sv'), hora: ini.toTimeString().slice(0, 5), duracao: Math.round((fim - ini) / 6e4), local: e.location, notas: e.description }, e);
+    const ok = await novoEvento({ titulo: e.summary, cliente_id: clienteDoEvento(e, cs)?.id || '', data: ini.toLocaleDateString('sv'), hora: ini.toTimeString().slice(0, 5), duracao: Math.round((fim - ini) / 6e4), local: e.location, notas: e.description }, e);
     if (ok) agenda();
   });
   if ($('#nEv')) $('#nEv').onclick = async () => { if (await novoEvento()) agenda(); };
+  if ($('#reservar')) $('#reservar').onclick = async () => { if (await reservarHorarios()) agenda(); };
+  if ($('#cfgAg')) $('#cfgAg').onclick = async () => { if (await configurarAgendas()) agenda(); };
   if ($('#desc')) $('#desc').onclick = async () => { if (await confirma('Desconectar o Google Agenda?')) { await google('desconectar'); agenda(); } };
 }
+
+// ficha do cliente: compromissos da agenda ligados a ele (marcados pelo CRM, com ele convidado ou com o nome dele no título)
+async function compromissosDoCliente(c) {
+  const de = new Date(Date.now() - 730 * 864e5).toISOString(), ate = new Date(Date.now() + 180 * 864e5).toISOString();
+  const buscas = [{ prop: 'crm_cliente=' + c.id }, ...[c.email, c.empresa, c.nome].filter(x => x && x.trim().length >= 4).map(q => ({ q: q.trim() }))];
+  let rs = null; try { rs = await Promise.all(buscas.map(b => google('listar', { de, ate, ...b }))); } catch { }
+  const el = $('#cEventos'); if (!el) return;
+  if (!rs || rs[0].conectado === false) { el.innerHTML = `<h3>Compromissos</h3><p class="vazio">${rs ? 'Google Agenda não conectado.' : 'Agenda indisponível agora.'}</p>`; return; }
+  const um = { [c.id]: c }, vistos = new Set(), t = e => new Date(e.start.dateTime || e.start.date + 'T12:00').getTime(), agora = Date.now();
+  const evs = rs.flatMap(r => r.eventos || []).filter(e => !vistos.has(e.id) && vistos.add(e.id) && !reserva(e) && clienteDoEvento(e, um));
+  const prox = evs.filter(e => t(e) >= agora).sort((a, b) => t(a) - t(b)).slice(0, 5), pass = evs.filter(e => t(e) < agora).sort((a, b) => t(b) - t(a)).slice(0, 8);
+  const li = e => `<li><span class="mute" style="min-width:104px">${dataBR(new Date(t(e)).toLocaleDateString('sv'))} · ${horaEv(e)}</span><a class="cresce" href="${esc(e.htmlLink || '#')}" target="_blank" rel="noopener">${esc(e.summary || '(sem título)')}</a>${e.hangoutLink && t(e) >= agora ? `<a class="pill" href="${esc(e.hangoutLink)}" target="_blank" rel="noopener">Meet</a>` : ''}</li>`;
+  el.innerHTML = `<h3>Compromissos</h3>${prox.length ? `<small class="mute">Próximos</small><ul class="lista">${prox.map(li).join('')}</ul>` : ''}${pass.length ? `<small class="mute">Anteriores</small><ul class="lista">${pass.map(li).join('')}</ul>` : ''}${evs.length ? '' : '<p class="vazio">Nenhum compromisso com este cliente na agenda.</p>'}`;
+}
+
+// Gmail: sai da conta Google conectada e fica no histórico do cliente
+const lerBase64 = f => new Promise((ok, falha) => { const r = new FileReader(); r.onload = () => ok(String(r.result).split(',')[1] || ''); r.onerror = falha; r.readAsDataURL(f); });
+async function enviarEmail(c) {
+  const v = await formulario('E-mail para ' + c.nome, [{ k: 'para', l: 'Para', t: 'email', req: true }, { k: 'assunto', l: 'Assunto', req: true }, { k: 'texto', l: 'Mensagem', t: 'textarea', linhas: 10, req: true }],
+    { para: c.email }, '<label>Anexos (até 15 MB no total)<input type="file" id="anexosEmail" multiple></label><p class="mute" style="margin:0">Sai do Gmail da Rovya e fica registrado no histórico deste cliente.</p>', 'Enviar');
+  if (!v) return false;
+  const arqs = [...($('#anexosEmail')?.files || [])];
+  if (arqs.reduce((s, f) => s + f.size, 0) > 15 * 1048576) { toast('Os anexos passam de 15 MB. Mande o link do Drive no texto.', true); return false; }
+  let r;
+  try { r = await google('email', { para: v.para, assunto: v.assunto, texto: v.texto, anexos: await Promise.all(arqs.map(async f => ({ nome: f.name, tipo: f.type, base64: await lerBase64(f) }))) }); }
+  catch (e) { toast(semRede(e) ? 'Sem internet: o e-mail não foi enviado.' : e.message, true); return false; }
+  if (r.conectado === false) { toast('Conecte o Google em Agenda para enviar pelo Gmail.', true); return false; }
+  await salvar({ tabela: 'crm_interacoes', acao: 'insert', dados: { cliente_id: c.id, tipo: 'email', data: hoje(),
+    resumo: `E-mail enviado: ${v.assunto}${arqs.length ? ` (${arqs.length} anexo${arqs.length > 1 ? 's' : ''})` : ''}\n\n${v.texto.slice(0, 1500)}` }, rotulo: 'E-mail enviado' }).catch(() => { });
+  toast('E-mail enviado'); return true;
+}
+
+// Contatos do Google → clientes (só os que ainda não estão no CRM, pelo e-mail ou pelo telefone)
+async function importarContatos() {
+  let r; try { r = await google('contatos'); } catch (e) { toast(semRede(e) ? 'Sem internet: precisa de conexão.' : e.message, true); return false; }
+  if (r.conectado === false) { toast('Conecte o Google em Agenda primeiro.', true); return false; }
+  const dig = s => (s || '').replace(/\D/g, '').slice(-9); // últimos 9 dígitos: ignora +55, DDD com/sem zero
+  const ja = await q(sb.from('crm_clientes').select('email,telefone'));
+  const tem = new Set(ja.flatMap(c => [c.email?.toLowerCase(), dig(c.telefone)]).filter(x => x && x.length > 3));
+  const novos = r.contatos.filter(c => !tem.has(c.email.toLowerCase()) && !tem.has(dig(c.telefone))).sort((a, b) => (a.nome || a.email).localeCompare(b.nome || b.email));
+  if (!novos.length) { toast(`Nenhum contato novo: os ${r.contatos.length} do Google já estão no CRM (ou não têm nome/e-mail).`); return false; }
+  await formulario(`Importar contatos do Google (${novos.length} novos)`, [], {},
+    `<input class="busca" id="filtroCont" type="search" placeholder="Filtrar…" style="width:100%">
+     <label style="flex-direction:row;gap:8px;align-items:center"><input type="checkbox" id="todosCont"> Marcar todos os visíveis</label>
+     <div id="listaCont" style="max-height:50vh;overflow:auto;display:grid;gap:4px">${novos.map((c, i) => `<label style="flex-direction:row;gap:10px;align-items:flex-start;cursor:pointer" data-busca="${esc(normal([c.nome, c.email, c.empresa, c.telefone].join(' ')))}"><input type="checkbox" data-cont="${i}"><span><b>${esc(c.nome || c.email)}</b><br><small class="mute">${esc([c.empresa, c.email, c.telefone].filter(Boolean).join(' · '))}</small></span></label>`).join('')}</div>`, 'Importar marcados');
+  const marcados = [...document.querySelectorAll('#listaCont [data-cont]:checked')].map(x => novos[+x.dataset.cont]);
+  if ($('#dlg').returnValue !== 'ok' || !marcados.length) return false;
+  await q(sb.from('crm_clientes').insert(marcados.map(c => ({ nome: c.nome || c.email, email: c.email || null, telefone: c.telefone || null, empresa: c.empresa || null, origem: 'Contatos do Google' }))));
+  toast(`${marcados.length} contato(s) importado(s)`); return true;
+}
+document.addEventListener('input', e => {
+  if (e.target.id === 'filtroCont') { const f = normal(e.target.value).trim(); document.querySelectorAll('#listaCont [data-busca]').forEach(l => l.hidden = !!f && !l.dataset.busca.includes(f)); }
+});
+document.addEventListener('change', e => {
+  if (e.target.id === 'todosCont') document.querySelectorAll('#listaCont label:not([hidden]) [data-cont]').forEach(x => x.checked = e.target.checked);
+});
 
 /* ---------- ASSISTENTE (IA + notificações, pela Edge Function crm-assistente) ---------- */
 const PEDIDO_RESUMO = 'Bom dia! Me dá o resumo de hoje?';

@@ -16,11 +16,11 @@ threading.Thread(target=srv.serve_forever, daemon=True).start()
 
 env = {**os.environ, 'PYTHONIOENCODING': 'utf-8'}
 resultado = {}
-for t in sorted(glob.glob(os.path.join(AQUI, 'teste_*.py'))):
-    nome = os.path.basename(t)[6:-3]
+for t in sorted(glob.glob(os.path.join(AQUI, 'teste_*.py')) + glob.glob(os.path.join(AQUI, 'teste_*.mjs'))):  # .mjs: funções do Supabase no Node
+    nome = os.path.splitext(os.path.basename(t))[0][6:]
     if filtro not in nome: continue
     t0 = time.time()
-    r = subprocess.run([sys.executable, t], capture_output=True, text=True, encoding='utf-8', env=env, cwd=RAIZ)
+    r = subprocess.run(['node', '--no-warnings', t] if t.endswith('.mjs') else [sys.executable, t], capture_output=True, text=True, encoding='utf-8', env=env, cwd=RAIZ)
     resultado[nome] = r.returncode == 0
     print(f"{'OK   ' if r.returncode == 0 else 'FALHA'} {nome} ({time.time() - t0:.0f} s)")
     if r.returncode: print('\n'.join('      ' + l for l in (r.stdout + r.stderr).strip().splitlines()[-15:]))

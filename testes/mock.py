@@ -84,7 +84,7 @@ window.__log = []; window.__D = D; const chain = t => { const st = { eq: {}, um:
 export const sb = { from: chain, rpc: n => Promise.resolve({ data: n === 'is_admin' ? true : 'pr1', error: null }),
   auth: { getSession: async () => ({ data: { session: { access_token: 'x' } } }), signOut: async () => {}, refreshSession: async () => ({}), mfa: { getAuthenticatorAssuranceLevel: async () => ({ data: { currentLevel: 'aal1', nextLevel: 'aal1' } }), listFactors: async () => ({ data: { totp: [], all: [] } }), enroll: async () => ({ data: { id: 'f1', totp: { qr_code: '', secret: 'ABCD1234' } } }), challengeAndVerify: async () => ({}), unenroll: async () => ({}) } },
   storage: { from: () => ({ createSignedUrl: async () => ({ data: { signedUrl: '#' } }), upload: async () => ({}), remove: async () => ({}) }) } };
-const f0 = window.fetch; window.__ev = [];
+const f0 = window.fetch; window.__ev = []; window.__EV = EV;
 const amanha = d => { const x = new Date(); x.setDate(x.getDate() + 1); const [h, m] = d.split(':'); x.setHours(+h, +m, 0, 0); return x.toISOString(); };
 EV.eventos.push({ id: 'g9', summary: 'Dentista', start: { dateTime: amanha('10:30') }, end: { dateTime: amanha('11:30') } });
 window.fetch = (u, o) => {
@@ -93,7 +93,16 @@ window.fetch = (u, o) => {
   const b = JSON.parse(o.body); window.__ev.push(b);
   if (b.acao === 'listar') { const de = new Date(b.de), ate = new Date(b.ate);
     return Promise.resolve(new Response(JSON.stringify({ ...EV, eventos: EV.eventos.filter(e => new Date(e.start.dateTime) < ate && new Date(e.end.dateTime) > de) }))); }
-  if (b.acao === 'criar') { EV.eventos.push(b.evento); return Promise.resolve(new Response(JSON.stringify(b.evento))); }
+  if (b.acao === 'url') return Promise.resolve(new Response(JSON.stringify({ url: '#/agenda' })));
+  if (b.acao === 'criar') { const e = { id: 'n' + window.__ev.length, ...b.evento, _agenda: b.agenda, _tipo: b.agenda === 'pessoal' ? 'pessoal' : 'profissional' }; if (e.conferenceData) e.hangoutLink = 'https://meet.google.com/abc-defg-hij'; EV.eventos.push(e); return Promise.resolve(new Response(JSON.stringify(e))); }
+  if (b.acao === 'agendas') return Promise.resolve(new Response(JSON.stringify({ faltam: [], config: { profissional: 'primary', pessoal: EV.temPessoal ? 'pes1' : null, mostrar: [] },
+    lista: [{ id: 'rovyacreative@gmail.com', nome: 'Rovya', principal: true, papel: 'owner' }, { id: 'pes1', nome: 'Pessoal', papel: 'owner' }, { id: 'feriados', nome: 'Feriados no Brasil', papel: 'reader' }] })));
+  if (b.acao === 'salvar_agendas') { EV.temPessoal = !!b.agendas.pessoal; return Promise.resolve(new Response(JSON.stringify({ ok: true }))); }
+  if (b.acao === 'criar_agenda') return Promise.resolve(new Response(JSON.stringify({ id: 'pes1' })));
+  if (b.acao === 'contatos') return Promise.resolve(new Response(JSON.stringify({ contatos: [
+    { nome: 'Paulo Mendes', email: 'PAULO@horizonte.com', telefone: '', empresa: '' }, { nome: 'Joana Prado', email: 'joana@prado.com', telefone: '+55 16 98888-1111', empresa: 'Prado Café' },
+    { nome: 'Rui Costa', email: '', telefone: '(16) 97777-2222', empresa: '' }, { nome: 'Lia Souza', email: 'lia@souza.com', telefone: '', empresa: 'Souza Arquitetura' }] })));
+  if (b.acao === 'email') return Promise.resolve(new Response(JSON.stringify({ ok: true })));
   return Promise.resolve(new Response('{}'));
 };
 """ % (json.dumps(D, ensure_ascii=False), json.dumps(EV, ensure_ascii=False))
