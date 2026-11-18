@@ -1,0 +1,21 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Sessão</title>
+<script>
+// Login compartilhado: o painel das figurinhas (stickers.rovyacreative.com.br) abre esta página escondida
+// e lê/grava o login do Supabase aqui, no armazenamento do CRM. Assim entrar em um entra no outro, e sair sai dos dois.
+// Só responde a quem está na lista, e só mexe na chave do login.
+const PODE = ['https://stickers.rovyacreative.com.br'];
+const CHAVE = /^sb-jgigosrsyxjqqhckudfe-auth-token(-code-verifier)?$/;
+addEventListener('message', e => {
+  const { id, op, k, v } = e.data || {};
+  if (!PODE.includes(e.origin) || !CHAVE.test(k)) return;
+  let valor = null;
+  try {
+    if (op === 'get') valor = localStorage.getItem(k);
+    else if (op === 'set') localStorage.setItem(k, v);
+    else if (op === 'del') localStorage.removeItem(k);
+  } catch { }
+  e.source.postMessage({ id, valor }, e.origin);
+});
+</script>
