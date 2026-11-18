@@ -6,7 +6,7 @@ import { documentos, cartaoDrive, ligarCartaoDrive } from './drive.js';
 import { financeiro, abaFinanceiro } from './financeiro.js';
 import { configuracoes } from './configuracoes.js';
 import { relatorios } from './relatorios.js';
-import { tarefas, abaTarefas, tarefasDaSemana, linhaTarefa, ligarLinhas, projetosAtivos } from './tarefas.js';
+import { tarefas, abaTarefas, tarefasDaSemana, linhaTarefa, ligarLinhas, projetosAtivos, novaTarefa } from './tarefas.js';
 
 const ETAPAS_FUNIL = [['contato', 'Primeiro contato'], ['diagnostico', 'Diagnóstico'], ['proposta', 'Proposta enviada'], ['negociacao', 'Negociação'], ['ganho', 'Fechado'], ['perdido', 'Perdido']];
 const TIPOS_LEAD = [['receptivo', 'Receptivo (chegou até mim)'], ['ativo', 'Ativo (prospecção)']];
@@ -149,11 +149,11 @@ async function editarOportunidade(o) {
   await moverOportunidade(o, v.etapa, v);
 }
 // histórico do lead/cliente; com oportunidade, já atualiza o próximo passo (fluxo: reunião → próxima ação)
-async function registrarContato(clienteId, o = null, x = null) {
+async function registrarContato(clienteId, o = null, x = null, val = {}) {
   const campos = [{ k: 'tipo', l: 'Tipo', t: 'select', o: TIPOS_CONTATO, meia: true }, { k: 'data', l: 'Data', t: 'date', req: true, meia: true },
     { k: 'resumo', l: 'O que foi conversado', t: 'textarea', linhas: 5, req: true }];
   if (o) campos.push({ k: 'proximo_passo', l: 'Próximo passo (atualiza o funil)' }, { k: 'proximo_em', l: 'Quando', t: 'date' });
-  const v = await formulario(x ? 'Editar registro' : 'Registrar contato', campos, x || { tipo: 'reuniao', data: hoje(), proximo_passo: o?.proximo_passo, proximo_em: o?.proximo_em },
+  const v = await formulario(x ? 'Editar registro' : 'Registrar contato', campos, x || { tipo: 'reuniao', data: hoje(), proximo_passo: o?.proximo_passo, proximo_em: o?.proximo_em, ...val },
     x ? '<button class="bt fantasma" value="apagar" formnovalidate style="justify-self:start;color:var(--bad)">Apagar registro</button>' : '');
   if (x && $('#dlg').returnValue === 'apagar') { if (await confirma('Apagar este registro do histórico?')) await salvar({ tabela: 'crm_interacoes', acao: 'delete', id: x.id, rotulo: 'Registro de contato' }); return true; }
   if (!v) return false;
@@ -702,9 +702,9 @@ async function compromissosDoCliente(c) {
 
 // Gmail: sai da conta Google conectada e fica no histórico do cliente
 const lerBase64 = f => new Promise((ok, falha) => { const r = new FileReader(); r.onload = () => ok(String(r.result).split(',')[1] || ''); r.onerror = falha; r.readAsDataURL(f); });
-async function enviarEmail(c) {
+async function enviarEmail(c, val = {}) {
   const v = await formulario('E-mail para ' + c.nome, [{ k: 'para', l: 'Para', t: 'email', req: true }, { k: 'assunto', l: 'Assunto', req: true }, { k: 'texto', l: 'Mensagem', t: 'textarea', linhas: 10, req: true }],
-    { para: c.email }, '<label>Anexos (até 15 MB no total)<input type="file" id="anexosEmail" multiple></label><p class="mute" style="margin:0">Sai do Gmail da Rovya e fica registrado no histórico deste cliente.</p>', 'Enviar');
+    { para: c.email, ...val }, '<label>Anexos (até 15 MB no total)<input type="file" id="anexosEmail" multiple></label><p class="mute" style="margin:0">Sai do Gmail da Rovya e fica registrado no histórico deste cliente.</p>', 'Enviar');
   if (!v) return false;
   const arqs = [...($('#anexosEmail')?.files || [])];
   if (arqs.reduce((s, f) => s + f.size, 0) > 15 * 1048576) { toast('Os anexos passam de 15 MB. Mande o link do Drive no texto.', true); return false; }
@@ -751,23 +751,76 @@ const gravarChat = m => { try { localStorage.setItem(chaveChat(), JSON.stringify
 const fmtIA = t => esc(t).replace(/\*\*(.+?)\*\*/g, '<b>$1</b>').replace(/^#{1,4}\s*(.+)$/gm, '<b>$1</b>').replace(/\n/g, '<br>');
 
 // a conversa (a mesma na tela Assistente e na janelinha da Sabrina do canto: as duas leem e gravam o chat do dia)
-function montarChat(alvo, sugestoes) {
+// a IA só PROPÕE (crm-assistente devolve {nome, args}); cada proposta vira um cartão e só acontece quando ela confirma:
+// abre o formulário de sempre já preenchido (tarefa, contato, compromisso, e-mail, proposta) ou pergunta "confirmar?" (funil, pago)
+const so = o => Object.fromEntries(Object.entries(o).filter(([, v]) => v != null && v !== ''));
+const umRegistro = async (t, id) => id ? q(sb.from(t).select('*').eq('id', id).maybeSingle()) : null;
+const naoAchei = () => { toast('Não achei esse registro no CRM. Peça de novo à assistente.', true); return false; };
+const ACOES_IA = {
+  criar_tarefa: { icone: '✓', verbo: 'Revisar tarefa', fazer: a => novaTarefa(so({ titulo: a.titulo, descricao: a.descricao, prazo: a.prazo, prioridade: a.prioridade, cliente_id: a.cliente_id, projeto_id: a.projeto_id })) },
+  registrar_contato: { icone: '✎', verbo: 'Revisar anotação', fazer: async a => {
+    if (!await umRegistro('crm_clientes', a.cliente_id)) return naoAchei();
+    return registrarContato(a.cliente_id, await umRegistro('crm_oportunidades', a.oportunidade_id), null, so({ tipo: a.tipo, data: a.data, resumo: a.texto, proximo_passo: a.proximo_passo, proximo_em: a.proximo_em }));
+  } },
+  mover_oportunidade: { icone: '⟡', verbo: 'Confirmar', fazer: async a => {
+    const o = await umRegistro('crm_oportunidades', a.oportunidade_id), etapa = ETAPAS_FUNIL.find(e => e[0] === a.etapa);
+    if (!o || !etapa) return naoAchei();
+    if (!await confirma(`Mover “${o.titulo}” para ${etapa[1]}?`)) return false;
+    await moverOportunidade(o, a.etapa, a.etapa === 'perdido' && a.motivo_perda ? { motivo_perda: a.motivo_perda } : {}); toast('Funil atualizado'); return true;
+  } },
+  marcar_pago: { icone: '◎', verbo: 'Confirmar', fazer: async a => {
+    const x = await umRegistro('crm_parcelas', a.lancamento_id); if (!x) return naoAchei();
+    if (x.pago_em) { toast('Esse já estava pago'); return true; }
+    if (!await confirma(`Marcar “${x.descricao || 'lançamento'}” (${brl(x.valor)}) como pago hoje?`)) return false;
+    if (await salvar({ tabela: 'crm_parcelas', acao: 'update', id: x.id, dados: { pago_em: hoje() }, antes: campos(x, ['pago_em']), rotulo: 'Pagamento' }) === true) toast('Marcado como pago');
+    return true;
+  } },
+  agendar_compromisso: { icone: '◷', verbo: 'Revisar compromisso', fazer: a => novoEvento(so({ titulo: a.titulo, cliente_id: a.cliente_id, data: a.data, hora: a.hora, duracao: a.duracao, notas: a.notas, meet: a.meet ? '1' : '', convidar: a.convidar ? '1' : '' })) },
+  escrever_email: { icone: '✉', verbo: 'Revisar e enviar', fazer: async a => { const c = await umRegistro('crm_clientes', a.cliente_id); return c ? enviarEmail(c, so({ assunto: a.assunto, texto: a.texto })) : naoAchei(); } },
+  escrever_whatsapp: { icone: '☏', verbo: 'Revisar e abrir no WhatsApp', fazer: async a => {
+    const c = await umRegistro('crm_clientes', a.cliente_id); if (!c) return naoAchei();
+    const v = await formulario('WhatsApp para ' + c.nome, [{ k: 'texto', l: 'Mensagem', t: 'textarea', linhas: 8, req: true }], { texto: a.texto },
+      c.telefone ? '' : '<p class="mute" style="margin:0">Este cliente não tem WhatsApp na ficha: o WhatsApp abre para você escolher o contato.</p>', 'Abrir no WhatsApp');
+    if (!v) return false;
+    let n = (c.telefone || '').replace(/\D/g, ''); if (n.length === 10 || n.length === 11) n = '55' + n;   // DDD + número: põe o +55
+    const url = `https://wa.me/${n}?text=${encodeURIComponent(v.texto)}`;
+    const w = open(url, '_blank'); if (w) w.opener = null; else location.href = url;   // popup bloqueado: abre aqui mesmo
+    return true;
+  } },
+  rascunho_proposta: { icone: '✎', verbo: 'Criar rascunho', fazer: a => novaProposta(so({ cliente_id: a.cliente_id, oportunidade_id: a.oportunidade_id, titulo: a.titulo, corpo: a.corpo })) },
+};
+// o que vai para a IA: o texto + o que aconteceu com cada cartão (para ela não propor de novo o que já foi feito)
+const paraIA = m => ({ role: m.role, content: m.acoes?.length ? `${m.content}\n[cartões: ${m.acoes.map(a => `${a.args?.rotulo || a.nome} (${a.feita ? 'feito' : 'não confirmado'})`).join('; ')}]` : m.content });
+// a tela aberta (ficha do cliente, projeto…), para "o que falta aqui?"
+const telaAtual = () => { const [rota, id] = location.hash.replace(/^#\/?/, '').split('/'); return rota && rota !== 'assistente' ? so({ rota, id }) : undefined; };
+
+function montarChat(alvo) {
   let msgs = lerChat();
   alvo.innerHTML = `<div class="msgs" aria-live="polite"></div>
-    <form class="enviar"><textarea rows="1" placeholder="${sugestoes ? 'Pergunte algo… (ex.: o que falta na Conecta?)' : 'Pergunte algo…'}" aria-label="Pergunta para a assistente"></textarea><button class="bt">Enviar</button></form>
-    ${sugestoes ? `<div class="sugestoes">${['O que é prioridade hoje?', 'Quanto tenho a receber este mês?', 'Quem está sem resposta há mais tempo?', 'Como está cada projeto?'].map(s => `<button type="button" class="bt peq sec">${s}</button>`).join('')}</div>` : ''}`;
+    <form class="enviar"><textarea rows="1" placeholder="Pergunte ou peça algo…" aria-label="Pergunta para a assistente"></textarea><button class="bt">Enviar</button></form>`;
   const caixa = alvo.querySelector('.msgs'), form = alvo.querySelector('form'), campo = form.querySelector('textarea'), bt = form.querySelector('button');
+  const cartao = (a, i, j) => { const t = ACOES_IA[a.nome]; return `<div class="acao-ia${a.feita ? ' feita' : ''}"><span><i>${t.icone}</i>${esc(a.args?.rotulo || a.nome)}</span>
+    <button type="button" class="bt peq${a.feita ? ' sec' : ''}" data-acao="${i}:${j}" ${a.feita ? 'disabled' : ''}>${a.feita ? '✓ Feito' : t.verbo}</button></div>`; };
   const desenhar = (pensando) => {
-    caixa.innerHTML = msgs.filter(m => !m.oculta).map(m => `<div class="msg ${m.role === 'user' ? 'eu' : 'ia'}">${m.role === 'user' ? esc(m.content) : fmtIA(m.content)}</div>`).join('')
+    caixa.innerHTML = msgs.map((m, i) => m.oculta ? '' : `<div class="msg ${m.role === 'user' ? 'eu' : 'ia'}">${m.role === 'user' ? esc(m.content) : fmtIA(m.content)}</div>`
+      + (m.acoes || []).map((a, j) => ACOES_IA[a.nome] ? cartao(a, i, j) : '').join('')).join('')
       + (pensando ? '<div class="msg ia pensando"><i></i><i></i><i></i></div>' : '');
     caixa.scrollTop = caixa.scrollHeight;
+  };
+  caixa.onclick = async e => {
+    const b = e.target.closest('[data-acao]'); if (!b) return;
+    const [i, j] = b.dataset.acao.split(':').map(Number), a = msgs[i]?.acoes?.[j]; if (!a || a.feita) return;
+    b.disabled = true;
+    try { if (await ACOES_IA[a.nome].fazer(a.args || {})) { a.feita = true; gravarChat(msgs); poseSabrina('comemorando', 3); if (!/^#\/assistente/.test(location.hash) && !$('#dlg').open) rotear(); } }
+    catch (er) { toast(er.message, true); }
+    desenhar();
   };
   const perguntar = async texto => {
     if (texto) msgs.push({ role: 'user', content: texto });
     bt.disabled = true; desenhar(true); poseSabrina('pensando');
     try {
-      const { resposta } = await funcao('crm-assistente', 'chat', { mensagens: msgs.map(({ role, content }) => ({ role, content })) });
-      msgs.push({ role: 'assistant', content: resposta }); gravarChat(msgs); poseSabrina('apresentando', 6);
+      const { resposta, acoes } = await funcao('crm-assistente', 'chat', { mensagens: msgs.map(paraIA), contexto: telaAtual() });
+      msgs.push({ role: 'assistant', content: resposta, ...(acoes?.length && { acoes }) }); gravarChat(msgs); poseSabrina('apresentando', 6);
     } catch (e) { msgs.push({ role: 'assistant', content: '⚠️ ' + e.message }); poseSabrina('aceno'); }
     bt.disabled = false; desenhar();
   };
@@ -775,17 +828,36 @@ function montarChat(alvo, sugestoes) {
   if (!msgs.length) { msgs.push({ role: 'user', content: PEDIDO_RESUMO, oculta: true }); perguntar(); } // resumo do dia ao abrir
   form.onsubmit = e => { e.preventDefault(); const t = campo.value.trim(); if (!t) return; campo.value = ''; perguntar(t); };
   campo.onkeydown = e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); form.requestSubmit(); } };
-  alvo.querySelectorAll('.sugestoes button').forEach(b => b.onclick = () => perguntar(b.textContent));
-  return campo;
+  return { campo, perguntar };
 }
 
+// o que a assistente sabe fazer (na tela Assistente); exemplo com ✦ manda direto, os outros vão para a caixa para ela completar
+const CAPACIDADES = [
+  ['Responder sobre o CRM', 'Clientes, funil, projetos, entregas, tarefas, dinheiro, contratos, propostas e os próximos 14 dias da agenda.',
+    ['✦O que é prioridade hoje?', '✦Quanto tenho a receber este mês?', '✦Quem está sem resposta há mais tempo?', '✦Como está cada projeto?']],
+  ['Fazer por você, com confirmação', 'Ela prepara e mostra um cartão; nada muda no CRM até você conferir e confirmar.',
+    ['Cria uma tarefa para amanhã: ', 'Anota que a reunião com … foi ótima e o próximo passo é ', 'Move … para Negociação', 'Marca como paga a parcela de ', 'Marca reunião com … quinta às 15h, com Meet e convite']],
+  ['Escrever', 'E-mail (sai do seu Gmail), WhatsApp, rascunho de proposta, ideias de pauta e legendas, na sua voz.',
+    ['Escreve um e-mail de retorno para ', 'Uma mensagem de WhatsApp lembrando com carinho da parcela de ', 'Faz um rascunho de proposta para ', 'Me dá 5 ideias de pauta para ']],
+  ['Saber onde você está', 'Aberta pela Sabrina do canto numa ficha de cliente, projeto, proposta ou contrato, ela já sabe do que você está falando.',
+    ['O que falta aqui?', 'Quando falei com ela pela última vez?']],
+  ['Avisar no celular', `Resumo do dia às 7h30; “precisa da sua atenção” quando um cliente com negociação aberta está há 10 dias sem contato, uma proposta vence em até 3 dias, um contrato entra no prazo de aviso ou uma parcela atrasa; e às sextas, como foi a semana.`, []],
+];
 async function assistente() {
   fecharSabrina();
-  main.innerHTML = `<div class="topo"><div class="topo-sab">${figuraSabrina()}<div><div class="eyebrow">Sua assistente</div><h1>Assistente</h1><p>Pergunte sobre clientes, projetos, prazos, agenda e dinheiro.</p></div></div>
+  main.innerHTML = `<div class="topo"><div class="topo-sab">${figuraSabrina()}<div><div class="eyebrow">Sua assistente</div><h1>Assistente</h1><p>Pergunte, peça para fazer ou para escrever. Nada muda no CRM sem você confirmar.</p></div></div>
     <div class="acoes" id="avisos"></div></div>
-    <section class="chat card" id="chatPagina"></section>`;
+    <div class="assist"><section class="chat card" id="chatPagina"></section>
+      <aside class="card capac" aria-label="O que a assistente sabe fazer"><h3>O que eu faço por você</h3>
+        ${CAPACIDADES.map(([t, d, ex]) => `<div class="cap"><b>${t}</b><p>${d}</p>${ex.length ? `<div class="sugestoes">${ex.map(x => `<button type="button" class="bt peq sec" data-ex="${esc(x)}">${esc(x.replace(/^✦/, '').replace(/[ :]+$/, '').replace(/ … /g, ' … '))}</button>`).join('')}</div>` : ''}</div>`).join('')}
+      </aside></div>`;
   animarSabrina(main);
-  montarChat($('#chatPagina'), true);
+  const { campo, perguntar } = montarChat($('#chatPagina'));
+  main.querySelector('.capac').onclick = e => {
+    const x = e.target.closest('[data-ex]')?.dataset.ex; if (!x) return;
+    if (x.startsWith('✦')) return perguntar(x.slice(1));
+    campo.value = x; campo.focus(); const p = x.indexOf('…'); p >= 0 ? campo.setSelectionRange(p, p + 1) : campo.setSelectionRange(x.length, x.length);
+  };
   avisoNotificacoes();
 }
 
@@ -828,7 +900,7 @@ function sabrinaNoCanto() {
     if (canto.classList.toggle('aberta')) {
       bt.setAttribute('aria-expanded', 'true'); POSES_SABRINA.forEach(p => { new Image().src = `img/sabrina-${p}.webp`; });
       poseSabrina('oi', 3);
-      const campo = montarChat(canto.querySelector('#sabChat'), false);   // relê o chat do dia (pode ter mudado na tela Assistente); sem conversa, já pede o resumo e ela pensa
+      const { campo } = montarChat(canto.querySelector('#sabChat'));   // relê o chat do dia (pode ter mudado na tela Assistente); sem conversa, já pede o resumo e ela pensa
       setTimeout(() => campo.focus({ preventScroll: true }), 300);
     } else { bt.setAttribute('aria-expanded', 'false'); poseSabrina('aceno'); }
   };

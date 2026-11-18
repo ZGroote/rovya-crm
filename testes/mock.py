@@ -103,7 +103,11 @@ window.fetch = (u, o) => {
     { nome: 'Paulo Mendes', email: 'PAULO@horizonte.com', telefone: '', empresa: '' }, { nome: 'Joana Prado', email: 'joana@prado.com', telefone: '+55 16 98888-1111', empresa: 'Prado Café' },
     { nome: 'Rui Costa', email: '', telefone: '(16) 97777-2222', empresa: '' }, { nome: 'Lia Souza', email: 'lia@souza.com', telefone: '', empresa: 'Souza Arquitetura' }] })));
   if (b.acao === 'email') return Promise.resolve(new Response(JSON.stringify({ ok: true })));
-  if (b.acao === 'chat') return new Promise(ok => setTimeout(ok, 600, new Response(JSON.stringify({ resposta: b.mensagens.length > 1 ? 'Você tem **R$ 2.000,00** a receber.' : '**Hoje:** 2 tarefas e 1 compromisso.' }))));
+  if (b.acao === 'chat') { const u = b.mensagens.at(-1).content, ac = (nome, args) => ({ nome, args });
+    const acoes = /tarefa/i.test(u) ? [ac('criar_tarefa', { rotulo: 'Tarefa: ligar para a Marina (sex, 20/11)', titulo: 'Ligar para a Marina', prazo: '2026-11-20', prioridade: 'alta', cliente_id: 'c2' })]
+      : /move/i.test(u) ? [ac('mover_oportunidade', { rotulo: 'Clínica Dias para Negociação', oportunidade_id: 'o2', etapa: 'negociacao' })]
+      : /whats/i.test(u) ? [ac('escrever_whatsapp', { rotulo: 'WhatsApp para o Paulo', cliente_id: 'c1', texto: 'Oi, Paulo! Tudo bem?' }), ac('escrever_email', { rotulo: 'E-mail para o Paulo', cliente_id: 'c1', assunto: 'Retorno', texto: 'Oi, Paulo!' })] : [];
+    return new Promise(ok => setTimeout(ok, 600, new Response(JSON.stringify({ resposta: acoes.length ? 'Preparei para você conferir:' : b.mensagens.length > 1 ? 'Você tem **R$ 2.000,00** a receber.' : '**Hoje:** 2 tarefas e 1 compromisso.', acoes })))); }
   return Promise.resolve(new Response('{}'));
 };
 """ % (json.dumps(D, ensure_ascii=False), json.dumps(EV, ensure_ascii=False))

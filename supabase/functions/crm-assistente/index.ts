@@ -1,9 +1,12 @@
 // Assistente da Sabrina: resumo do dia, chat com IA (Gemini, nível pago) e notificações no celular.
 // POST com login de admin:
-//   {acao:'chat', mensagens:[{role,content}]}  conversa (sem mensagens = resumo do dia escrito pela IA)
+//   {acao:'chat', mensagens:[{role,content}], contexto:{rota,id}}  conversa (sem mensagens = resumo do dia escrito pela IA);
+//        devolve {resposta, acoes:[{nome,args}]}: ações que a IA PROPÕE (tarefa, contato, funil, pago, agenda, e-mail, WhatsApp, proposta).
+//        Nada é gravado aqui: o CRM mostra cada ação num cartão e só faz quando a Sabrina confirma (com o login dela).
 //   {acao:'chave'}                              chave pública para inscrever o celular nas notificações
 //   {acao:'testar'}                             manda uma notificação de teste
-// POST do pg_cron com header x-cron = crm_config.cron_key: notificação "seu resumo de hoje".
+// POST do pg_cron com header x-cron = crm_config.cron_key: notificação "seu resumo de hoje" + "precisa da sua atenção"
+//   (cliente sem retorno, proposta vencendo, contrato acabando, parcela atrasada) + às sextas "sua semana".
 // Secrets: GEMINI_API_KEY (chave de um projeto com faturamento = nível pago), GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET.
 import { createClient } from 'jsr:@supabase/supabase-js@2';
 import * as webpush from 'jsr:@negrel/webpush@^0.5.0';
@@ -40,17 +43,17 @@ async function retrato() {
   const desde = new Date(Date.now() - 365 * 864e5).toISOString().slice(0, 10);
   const [cli, ops, projs, parc, ag, contr, tars, hist, props, anos] = await Promise.all([
     db.from('crm_clientes').select('id,codigo,nome,empresa,origem,criado_em').order('nome'),
-    db.from('crm_oportunidades').select('titulo,etapa,valor,proximo_passo,proximo_em,motivo_perda,atualizado_em,crm_clientes(nome,empresa)')
+    db.from('crm_oportunidades').select('id,cliente_id,titulo,etapa,valor,proximo_passo,proximo_em,motivo_perda,atualizado_em,crm_clientes(nome,empresa)')
       .or(`etapa.not.in.(ganho,perdido),atualizado_em.gte.${desde}`),
-    db.from('crm_projetos').select('nome,status,valor,entrega_prevista,inicio,crm_clientes(nome,empresa),crm_etapas(ordem,titulo,crm_entregas(ordem,titulo,status,prazo))')
+    db.from('crm_projetos').select('id,nome,status,valor,entrega_prevista,inicio,crm_clientes(nome,empresa),crm_etapas(ordem,titulo,crm_entregas(ordem,titulo,status,prazo))')
       .or(`status.in.(ativo,pausado),criado_em.gte.${desde}`).neq('status', 'arquivado'),
-    db.from('crm_parcelas').select('tipo,categoria,descricao,valor,vencimento,pago_em,forma,crm_projetos(nome)').or(`pago_em.is.null,vencimento.gte.${desde}`).order('vencimento'),
+    db.from('crm_parcelas').select('id,tipo,categoria,descricao,valor,vencimento,pago_em,forma,crm_projetos(nome)').or(`pago_em.is.null,vencimento.gte.${desde}`).order('vencimento'),
     agenda(14),
     db.from('crm_contratos').select('titulo,tipo,status,inicio,fim,valor_mensal,valor_avulso,renovacao_auto,aviso_dias,crm_clientes(nome,empresa)')
       .or(`status.in.(rascunho,assinatura,vigente),fim.gte.${desde}`).order('fim'),
     db.from('crm_tarefas').select('titulo,prioridade,prazo,status,concluida_em,crm_projetos(nome)').neq('status', 'feita').order('prazo'),
     db.from('crm_interacoes').select('tipo,resumo,data,crm_clientes(nome,empresa)').order('data', { ascending: false }).limit(40),
-    db.from('crm_propostas').select('grupo,titulo,versao,status,valor,validade,enviada_em,crm_clientes(nome,empresa)')
+    db.from('crm_propostas').select('id,grupo,titulo,versao,status,valor,validade,enviada_em,crm_clientes(nome,empresa)')
       .or(`status.in.(rascunho,enviada),criado_em.gte.${desde}`).order('versao', { ascending: false }),
     db.from('crm_parcelas').select('tipo,valor,pago_em').not('pago_em', 'is', null), // só para os totais por ano
   ]);
@@ -65,18 +68,18 @@ async function retrato() {
   return {
     hoje: new Date().toLocaleDateString('pt-BR', { timeZone: TZ, weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }),
     hoje_iso: hojeSP(),
-    clientes: (cli.data ?? []).map(c => ({ codigo: c.codigo, nome: c.nome, empresa: c.empresa, origem: c.origem, desde: c.criado_em?.slice(0, 10) })),
-    funil: (ops.data ?? []).map((o: any) => ({ cliente: quem(o.crm_clientes), oportunidade: o.titulo, etapa: o.etapa, valor: o.valor, proximo_passo: o.proximo_passo, proximo_em: o.proximo_em, motivo_perda: o.motivo_perda, atualizado: o.atualizado_em?.slice(0, 10) })),
-    projetos: (projs.data ?? []).map((p: any) => ({ nome: p.nome, cliente: quem(p.crm_clientes), status: p.status, valor: p.valor, inicio: p.inicio, entrega_prevista: p.entrega_prevista,
+    clientes: (cli.data ?? []).map(c => ({ id: c.id, codigo: c.codigo, nome: c.nome, empresa: c.empresa, origem: c.origem, desde: c.criado_em?.slice(0, 10) })),
+    funil: (ops.data ?? []).map((o: any) => ({ id: o.id, cliente_id: o.cliente_id, cliente: quem(o.crm_clientes), oportunidade: o.titulo, etapa: o.etapa, valor: o.valor, proximo_passo: o.proximo_passo, proximo_em: o.proximo_em, motivo_perda: o.motivo_perda, atualizado: o.atualizado_em?.slice(0, 10) })),
+    projetos: (projs.data ?? []).map((p: any) => ({ id: p.id, nome: p.nome, cliente: quem(p.crm_clientes), status: p.status, valor: p.valor, inicio: p.inicio, entrega_prevista: p.entrega_prevista,
       etapas: (p.crm_etapas ?? []).sort((a: any, b: any) => a.ordem - b.ordem).map((e: any) => ({ etapa: e.titulo,
         entregas: (e.crm_entregas ?? []).sort((a: any, b: any) => a.ordem - b.ordem).map((x: any) => `${x.titulo} [${x.status}${x.prazo ? ', prazo ' + x.prazo : ''}]`) })) })),
     totais_por_ano_pagos: totais, // receitas recebidas e despesas pagas de todos os anos (os lançamentos abaixo são só do último ano + em aberto)
-    lancamentos: (parc.data ?? []).map((x: any) => ({ tipo: x.tipo, categoria: x.categoria, projeto: x.crm_projetos?.nome, descricao: x.descricao, valor: x.valor, vencimento: x.vencimento, pago_em: x.pago_em, forma: x.forma })),
+    lancamentos: (parc.data ?? []).map((x: any) => ({ id: x.id, tipo: x.tipo, categoria: x.categoria, projeto: x.crm_projetos?.nome, descricao: x.descricao, valor: x.valor, vencimento: x.vencimento, pago_em: x.pago_em, forma: x.forma })),
     contratos: (contr.data ?? []).map((x: any) => ({ cliente: quem(x.crm_clientes), titulo: x.titulo, tipo: x.tipo, status: x.status, inicio: x.inicio, fim: x.fim,
       valor_mensal: x.valor_mensal, valor_avulso: x.valor_avulso, renovacao_auto: x.renovacao_auto, aviso_dias: x.aviso_dias })),
     tarefas_abertas: (tars.data ?? []).map((t: any) => ({ titulo: t.titulo, prioridade: t.prioridade, prazo: t.prazo, status: t.status, projeto: t.crm_projetos?.nome })),
     historico_contatos: (hist.data ?? []).map((h: any) => ({ cliente: quem(h.crm_clientes), tipo: h.tipo, data: h.data, resumo: h.resumo })),
-    propostas: [...ultimas.values()].map((p: any) => ({ cliente: quem(p.crm_clientes), titulo: p.titulo, versao: p.versao, status: p.status, valor: p.valor, validade: p.validade, enviada_em: p.enviada_em })),
+    propostas: [...ultimas.values()].map((p: any) => ({ id: p.id, cliente: quem(p.crm_clientes), titulo: p.titulo, versao: p.versao, status: p.status, valor: p.valor, validade: p.validade, enviada_em: p.enviada_em })),
     agenda_14_dias: ag ?? 'Google Agenda não conectado',
   };
 }
@@ -102,7 +105,10 @@ function resumoCurto(r: any) {
 const SISTEMA = `Você é a assistente pessoal da Sabrina, dona da Rovya Creative (consultoria de posicionamento e gestão estratégica da comunicação).
 Você conversa com ela dentro do CRM da Rovya, como num chat de celular: português do Brasil, tom próximo e elegante, respostas curtas e diretas, com poucos emojis e listas curtas quando ajudar.
 Responda só com base nos DADOS DO CRM abaixo. Se algo não estiver nos dados, diga que não encontrou no CRM em vez de inventar. Valores em reais (R$), datas no formato brasileiro.
-Você ainda não consegue alterar nada no CRM; se ela pedir para mudar algo, explique onde fazer isso no CRM (Funil, Clientes, Projetos, Agenda, Financeiro ou Modelos).
+AÇÕES: quando ela pedir para FAZER algo, use as ferramentas (pode usar mais de uma): criar tarefa, anotar contato no histórico, mover no funil, marcar lançamento como pago, agendar compromisso (com Meet e convite), escrever e-mail, escrever WhatsApp, rascunho de proposta. Você só PROPÕE: o CRM mostra um cartão e nada acontece até ela confirmar, então proponha sem pedir licença antes e diga em uma frase o que preparou. Use sempre os ids que estão nos DADOS (nunca invente id; se não achar o cliente ou o registro, pergunte). Datas YYYY-MM-DD; horas HH:MM no horário de Brasília; "amanhã", "sexta" etc. contam a partir de hoje_iso. Para mudar algo que as ferramentas não cobrem, explique onde fazer no CRM.
+Textos de e-mail, WhatsApp e proposta: escreva completos, prontos para enviar, na voz da Sabrina (primeira pessoa, próxima, elegante, sem exagero nem clichê de marketing), usando o que os DADOS dizem do cliente. Ideias de pauta, legendas e roteiros: responda em texto, sem ferramenta.
+TELA ABERTA: quando vier, é o que ela está vendo no CRM agora; "aqui", "ela", "esse cliente" se referem a isso.
+Se ela perguntar o que você sabe fazer: responder sobre o CRM, fazer as ações acima com confirmação, escrever textos e avisar no celular (resumo às 7h30, o que precisa de atenção e, às sextas, como foi a semana).
 Status das entregas: a_fazer, produzindo, enviado, revisao, aprovado. Etapas do funil: contato, diagnostico, proposta, negociacao, ganho, perdido.
 Contratos: tipo recorrente (valor_mensal), avulso (valor_avulso) ou misto (os dois); status rascunho, assinatura, vigente, encerrado, cancelado; avise quando um vigente estiver a aviso_dias ou menos do fim. Propostas: status rascunho, enviada, aprovada, recusada (só a última versão de cada uma). Lançamentos: tipo receita ou despesa; pago_em vazio = em aberto. Tarefas: prioridade baixa/media/alta. historico_contatos: últimos contatos registrados com cada cliente (use para lembrar quem está sem retorno).
 Os dados trazem o que está em aberto ou em andamento e o que aconteceu no último ano (funil, projetos, lançamentos, contratos, propostas); de anos anteriores vêm só totais_por_ano_pagos. Se ela perguntar um detalhe mais antigo que isso, diga que o resumo só traz o último ano e indique a tela do CRM onde está (Financeiro, Projetos, Contratos…).
@@ -110,24 +116,104 @@ Quando ela pedir o resumo do dia, organize em: agenda de hoje, entregas e tarefa
 
 const MODELO = 'gemini-3.8-flash';
 
-async function conversar(mensagens: { role: 'user' | 'assistant'; content: string }[]) {
-  const dados = await retrato();
+// ferramentas: a IA só propõe; o CRM mostra o cartão e faz com o login dela depois do "confirmar"
+const S = (description: string, x: Record<string, unknown> = {}) => ({ type: 'string', description, ...x });
+const obj = (properties: Record<string, unknown>, required: string[]) => ({ type: 'object',
+  properties: { rotulo: S('frase curta para o cartão de confirmar, ex.: "Tarefa: ligar para a Marina (sex, 20/11)"'), ...properties }, required: ['rotulo', ...required] });
+const FERRAMENTAS = [
+  { name: 'criar_tarefa', description: 'Propõe uma tarefa nova.', parameters: obj({ titulo: S('título da tarefa'), descricao: S('detalhes (opcional)'), prazo: S('YYYY-MM-DD'),
+    prioridade: S('prioridade', { enum: ['baixa', 'media', 'alta'] }), cliente_id: S('id do cliente'), projeto_id: S('id do projeto') }, ['titulo']) },
+  { name: 'registrar_contato', description: 'Anota no histórico do cliente (reunião, ligação, mensagem, e-mail, visita ou anotação); com oportunidade, atualiza o próximo passo do funil.',
+    parameters: obj({ cliente_id: S('id do cliente'), oportunidade_id: S('id da oportunidade aberta dele (opcional)'), tipo: S('tipo', { enum: ['reuniao', 'ligacao', 'mensagem', 'email', 'visita', 'nota'] }),
+      data: S('YYYY-MM-DD'), texto: S('o que foi conversado'), proximo_passo: S('próximo passo (opcional)'), proximo_em: S('YYYY-MM-DD (opcional)') }, ['cliente_id', 'texto']) },
+  { name: 'mover_oportunidade', description: 'Muda a etapa de uma oportunidade no funil (ganho cria o projeto).',
+    parameters: obj({ oportunidade_id: S('id da oportunidade'), etapa: S('etapa nova', { enum: ['contato', 'diagnostico', 'proposta', 'negociacao', 'ganho', 'perdido'] }), motivo_perda: S('se perdido') }, ['oportunidade_id', 'etapa']) },
+  { name: 'marcar_pago', description: 'Marca um lançamento (receita ou despesa) como pago hoje.', parameters: obj({ lancamento_id: S('id do lançamento') }, ['lancamento_id']) },
+  { name: 'agendar_compromisso', description: 'Cria um compromisso no Google Agenda dela, com link do Meet e convite ao cliente quando fizer sentido.',
+    parameters: obj({ titulo: S('título'), data: S('YYYY-MM-DD'), hora: S('HH:MM, Brasília'), duracao: { type: 'integer', description: 'minutos' }, cliente_id: S('id do cliente (opcional)'),
+      meet: { type: 'boolean', description: 'criar link do Meet' }, convidar: { type: 'boolean', description: 'mandar convite ao e-mail do cliente' }, notas: S('notas (opcional)') }, ['titulo', 'data', 'hora']) },
+  { name: 'escrever_email', description: 'Escreve um e-mail para um cliente; ela revisa e envia pelo Gmail.', parameters: obj({ cliente_id: S('id do cliente'), assunto: S('assunto'), texto: S('texto completo') }, ['cliente_id', 'assunto', 'texto']) },
+  { name: 'escrever_whatsapp', description: 'Escreve uma mensagem de WhatsApp para um cliente; ela abre no WhatsApp e envia.', parameters: obj({ cliente_id: S('id do cliente'), texto: S('mensagem completa') }, ['cliente_id', 'texto']) },
+  { name: 'rascunho_proposta', description: 'Cria o rascunho de uma proposta comercial para o cliente (texto em Markdown, seções com ##).',
+    parameters: obj({ cliente_id: S('id do cliente'), oportunidade_id: S('id da oportunidade (opcional)'), titulo: S('título'), corpo: S('texto da proposta em Markdown') }, ['cliente_id', 'titulo', 'corpo']) },
+];
+const NOMES = new Set(FERRAMENTAS.map(f => f.name));
+
+// a tela que ela está olhando no CRM (vem junto da pergunta): ficha do cliente, projeto, proposta ou contrato
+const TELAS: Record<string, [string, string]> = {
+  cliente: ['crm_clientes', 'id,codigo,nome,empresa,email,telefone,instagram,origem,notas,criado_em'],
+  projeto: ['crm_projetos', 'id,nome,status,valor,inicio,entrega_prevista,cliente_id,crm_clientes(nome,empresa)'],
+  proposta: ['crm_propostas', 'id,titulo,versao,status,valor,validade,enviada_em,cliente_id,crm_clientes(nome,empresa)'],
+  contrato: ['crm_contratos', 'id,titulo,tipo,status,inicio,fim,valor_mensal,valor_avulso,cliente_id,crm_clientes(nome,empresa)'],
+};
+async function telaAberta(c: any) {
+  const rota = String(c?.rota ?? '').replace(/[^a-z]/g, '').slice(0, 30), id = /^[\w-]{1,64}$/.test(String(c?.id ?? '')) ? String(c.id) : '';
+  if (!rota) return null;
+  if (!TELAS[rota] || !id) return { tela: rota };
+  const { data } = await db.from(TELAS[rota][0]).select(TELAS[rota][1]).eq('id', id).maybeSingle();
+  if (!data) return { tela: rota };
+  const cid = rota === 'cliente' ? id : (data as any).cliente_id;
+  const hist = cid ? (await db.from('crm_interacoes').select('tipo,data,resumo').eq('cliente_id', cid).order('data', { ascending: false }).limit(30)).data : [];
+  return { tela: rota, registro: data, historico_deste_cliente: hist ?? [] };
+}
+
+async function conversar(mensagens: { role: 'user' | 'assistant'; content: string }[], contexto?: unknown) {
+  const [dados, tela] = await Promise.all([retrato(), telaAberta(contexto)]);
   const msgs = mensagens.length ? mensagens : [{ role: 'user' as const, content: 'Bom dia! Me dá o resumo de hoje?' }];
   const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${MODELO}:generateContent`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'x-goog-api-key': env('GEMINI_API_KEY') },
     body: JSON.stringify({
-      systemInstruction: { parts: [{ text: `${SISTEMA}\n\nDADOS DO CRM (atualizados agora):\n${JSON.stringify(dados)}` }] },
+      systemInstruction: { parts: [{ text: `${SISTEMA}\n\nDADOS DO CRM (atualizados agora):\n${JSON.stringify(dados)}${tela ? `\n\nTELA ABERTA:\n${JSON.stringify(tela)}` : ''}` }] },
+      tools: [{ functionDeclarations: FERRAMENTAS }],
       contents: msgs.map(m => ({ role: m.role === 'assistant' ? 'model' : 'user', parts: [{ text: m.content }] })),
       generationConfig: { maxOutputTokens: 4096 },
     }),
   });
   const j = await r.json();
   if (!r.ok) { console.error('gemini', r.status, j.error?.message); throw new Error(`IA indisponível (${r.status}). Tente de novo em instantes.`); }
-  if (j.promptFeedback?.blockReason) return 'Desculpe, não consegui responder isso. Pode perguntar de outro jeito?';
-  const texto = (j.candidates?.[0]?.content?.parts ?? []).map((p: any) => p.text ?? '').join('').trim();
-  return texto || 'Não consegui montar uma resposta agora.';
+  if (j.promptFeedback?.blockReason) return { resposta: 'Desculpe, não consegui responder isso. Pode perguntar de outro jeito?', acoes: [] };
+  const partes = j.candidates?.[0]?.content?.parts ?? [];
+  const texto = partes.filter((p: any) => !p.thought).map((p: any) => p.text ?? '').join('').trim();
+  const acoes = partes.filter((p: any) => NOMES.has(p.functionCall?.name)).slice(0, 6).map((p: any) => ({ nome: p.functionCall.name, args: p.functionCall.args ?? {} }));
+  return { resposta: texto || (acoes.length ? 'Preparei para você conferir:' : 'Não consegui montar uma resposta agora.'), acoes };
 }
+
+/* ---------- avisos no celular (sem IA): o que está parado ou vencendo, e às sextas a semana ---------- */
+const SEM_RETORNO_DIAS = 10;
+const diaMais = (h: string, d: number) => new Date(Date.parse(h + 'T12:00:00Z') + d * 864e5).toISOString().slice(0, 10);
+async function alertas(r: any) {
+  const h = r.hoje_iso, itens: string[] = [];
+  const abertas = r.funil.filter((o: any) => !['ganho', 'perdido'].includes(o.etapa) && o.cliente_id);
+  if (abertas.length) {
+    const { data } = await db.from('crm_interacoes').select('cliente_id,data').in('cliente_id', [...new Set(abertas.map((o: any) => o.cliente_id))]).order('data', { ascending: false });
+    const ult = new Map<string, string>(); for (const x of data ?? []) if (!ult.has(x.cliente_id)) ult.set(x.cliente_id, x.data);
+    const parados = [...new Set(abertas.filter((o: any) => (ult.get(o.cliente_id) ?? o.atualizado ?? '') < diaMais(h, -SEM_RETORNO_DIAS)).map((o: any) => o.cliente))];
+    if (parados.length) itens.push(`💬 sem retorno há ${SEM_RETORNO_DIAS}+ dias: ${parados.join(', ')}`);
+  }
+  for (const p of r.propostas) if (p.status === 'enviada' && p.validade && p.validade >= h && p.validade <= diaMais(h, 3))
+    itens.push(`📄 proposta de ${p.cliente} vence ${p.validade === h ? 'hoje' : `em ${Math.round((Date.parse(p.validade) - Date.parse(h)) / 864e5)} dia(s)`}`);
+  for (const c of r.contratos) if (c.status === 'vigente' && c.fim && c.fim >= h && c.fim <= diaMais(h, c.aviso_dias ?? 30))
+    itens.push(`⚖️ contrato de ${c.cliente} termina em ${c.fim.split('-').reverse().join('/')}`);
+  const atras = r.lancamentos.filter((x: any) => x.tipo !== 'despesa' && !x.pago_em && x.vencimento && x.vencimento < h);
+  if (atras.length) itens.push(`💰 ${atras.length} parcela(s) atrasada(s): ${brl(atras.reduce((s: number, x: any) => s + +x.valor, 0))}`);
+  return itens;
+}
+async function semana(r: any) {
+  const de = diaMais(r.hoje_iso, -6);
+  const [{ count: feitas }, { count: contatos }] = await Promise.all([
+    db.from('crm_tarefas').select('id', { count: 'exact', head: true }).eq('status', 'feita').gte('concluida_em', de),
+    db.from('crm_interacoes').select('id', { count: 'exact', head: true }).gte('data', de)]);
+  const recebido = r.lancamentos.filter((x: any) => x.tipo !== 'despesa' && x.pago_em && x.pago_em >= de).reduce((s: number, x: any) => s + +x.valor, 0);
+  const novos = r.clientes.filter((c: any) => c.desde && c.desde >= de).length;
+  return `✅ ${feitas ?? 0} tarefa(s) feita(s) • 💰 ${brl(recebido)} recebido • 💬 ${contatos ?? 0} contato(s) • ✨ ${novos} cliente(s) novo(s)`;
+}
+// cabe na notificação: junta até ~190 caracteres e diz quantos ficaram de fora
+const caber = (itens: string[], max = 190) => {
+  let t = '';
+  for (const [i, x] of itens.entries()) { const n = t ? `${t} • ${x}` : x; if (n.length > max) return t ? `${t} (+${itens.length - i})` : x.slice(0, max - 1) + '…'; t = n; }
+  return t;
+};
 
 /* ---------- notificações ---------- */
 async function servidorPush() {
@@ -181,7 +267,11 @@ Deno.serve(async req => {
       // aviso avulso de outra função (ex.: crm-agendar quando alguém marca pelo site); sem aviso, é o resumo das 7h30
       const { aviso } = await req.json().catch(() => ({}));
       if (aviso?.titulo) return json(await notificar(String(aviso.titulo).slice(0, 80), String(aviso.corpo || '').slice(0, 200), String(aviso.url || '').startsWith('app.html#/') ? String(aviso.url).slice(8) : '#/agenda'));
-      return json(await notificar('Bom dia, Sabrina! ☀️', resumoCurto(await retrato())));
+      const r = await retrato(), enviados = [await notificar('Bom dia, Sabrina! ☀️', resumoCurto(r))];
+      const al = await alertas(r);
+      if (al.length) enviados.push(await notificar('Precisa da sua atenção', caber(al)));
+      if (new Date().toLocaleDateString('en-US', { timeZone: TZ, weekday: 'short' }) === 'Fri') enviados.push(await notificar('Sua semana ✦', await semana(r)));
+      return json(enviados);
     }
     if (!await eAdmin(req)) return json({ erro: 'Sem permissão' }, 401);
     const b = await req.json().catch(() => ({}));
@@ -194,7 +284,7 @@ Deno.serve(async req => {
           .filter((m: any) => (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string' && m.content.trim())
           .map((m: any) => ({ role: m.role, content: m.content.slice(0, 4000) }));
         if (msgs.length && msgs[0].role !== 'user') msgs.shift(); // a conversa precisa começar pela Sabrina
-        return json({ resposta: await conversar(msgs) });
+        return json(await conversar(msgs, b.contexto));
       }
     }
     return json({ erro: 'Ação desconhecida' }, 400);

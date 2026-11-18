@@ -72,7 +72,13 @@ A função `crm-assistente` usa o **Gemini pago** (`gemini-3.8-flash`). O nível
 3. (Opcional) Em console.cloud.google.com/billing/budgets, crie um orçamento de R$ 30/mês, que só avisa por e-mail.
 4. No celular, instale o app (Adicionar à tela inicial) → **Assistente** → **🔔 Receber resumo às 7h30** → **Testar notificação**.
 
-O resumo diário sai pelo pg_cron `crm-resumo-diario` (10:30 UTC = 07:30 em Brasília), que chama a função com o header `x-cron`.
+O resumo diário sai pelo pg_cron `crm-resumo-diario` (10:30 UTC = 07:30 em Brasília), que chama a função com o header `x-cron`. Na mesma hora vão também:
+- **"Precisa da sua atenção"** (só se houver algo): cliente com oportunidade aberta e sem contato há 10+ dias (`SEM_RETORNO_DIAS`), proposta enviada que vence em até 3 dias, contrato vigente dentro do `aviso_dias`, e parcelas a receber atrasadas.
+- **"Sua semana"**, às sextas: tarefas feitas, valor recebido, contatos registrados e clientes novos nos últimos 7 dias.
+
+**A Sabrina do canto** (o avatar do site, `img/sabrina-*`, fontes em `3d/poses/`) aparece em todas as telas e abre a conversa. A conversa do dia é a mesma da tela Assistente, guardada no aparelho. Junto com a pergunta vai a tela aberta (`contexto: {rota, id}`), e a função manda para a IA a ficha e o histórico desse cliente.
+
+**Ações:** a IA tem 8 ferramentas: tarefa, contato no histórico, mover no funil, marcar pago, compromisso com Meet, e-mail, WhatsApp e rascunho de proposta. Ela só **propõe**: a função devolve `acoes` e não grava nada. O CRM mostra um cartão para cada ação e, ao confirmar, abre o formulário de sempre já preenchido, ou pergunta "Confirmar?" no funil e no pago. Tudo é gravado com o login dela, pelas mesmas regras (RLS, MFA, fila sem internet). O cartão fica como "Feito", e a IA recebe essa informação nas próximas mensagens. A tela Assistente mostra "O que eu faço por você" com exemplos. Testes: `teste_sabrina.py` (tela) e `teste_assistente_funcao.mjs` (função).
 
 ## Segurança, registro e backup (etapa 4)
 

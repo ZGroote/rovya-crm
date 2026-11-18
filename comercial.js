@@ -55,11 +55,11 @@ export async function novaProposta(val = {}) {
   const v = await formulario('Nova proposta', [
     { k: 'cliente_id', l: 'Cliente', t: 'select', o: [['', 'Selecione…'], ...opcoesClientes(cs)], req: true },
     { k: 'titulo', l: 'Título', req: true },
-    { k: 'modelo', l: 'Começar a partir de', t: 'select', o: [...mods.map(m => [m.id, m.titulo]), ['', 'Em branco']] },
+    { k: 'modelo', l: 'Começar a partir de', t: 'select', o: [...mods.map(m => [m.id, m.titulo]), ['', val.corpo ? 'Texto escrito pela assistente' : 'Em branco']] },
     { k: 'validade', l: 'Válida até', t: 'date' }],
-    { modelo: mods[0]?.id ?? '', validade: diaLocal(15), ...val });
+    { modelo: val.corpo ? '' : mods[0]?.id ?? '', validade: diaLocal(15), ...val });
   if (!v) return null;
-  let corpo = null;
+  let corpo = val.corpo || null;   // a assistente pode mandar o texto pronto
   if (v.modelo) { const [c] = await q(sb.from('crm_clientes').select('*').eq('id', v.cliente_id)); corpo = preencher(mods.find(m => m.id === v.modelo).corpo, c); }
   const [p] = await q(sb.from('crm_propostas').insert({ cliente_id: v.cliente_id, oportunidade_id: val.oportunidade_id || null, titulo: v.titulo, corpo, validade: v.validade }).select('id'));
   toast('Proposta criada'); location.hash = '#/proposta/' + p.id; return p.id;
