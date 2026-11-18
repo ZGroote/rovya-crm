@@ -30,8 +30,14 @@ class Q {
   not(k, op, v) { if (op === 'is' && v === null) this.f.push(r => r[k] != null); return this; }
   or() { return this; } order() { return this; } neq() { return this; } is() { return this; } limit() { return this; }
   maybeSingle() { this.um = true; return this; }
-  insert() { return this; } delete() { return this; }
-  then(res) { const rs = (T[this.t] || []).filter(r => this.f.every(f => f(r))); return res(this.o?.head ? { count: rs.length } : { data: this.um ? rs[0] ?? null : rs }); }
+  lt(k, v) { this.f.push(r => (r[k] ?? '') < v); return this; }
+  insert(v) { this.ins = v; return this; } update(v) { this.upd = v; return this; } delete() { return this; }
+  then(res) {
+    const tb = T[this.t] ||= [];
+    if (this.ins) { tb.push(...[].concat(this.ins).map(r => ({ id: 'n' + tb.length, quando: new Date().toISOString(), resolvida: false, ...r }))); return res({ error: null }); }
+    const rs = tb.filter(r => this.f.every(f => f(r)));
+    if (this.upd) { rs.forEach(r => Object.assign(r, this.upd)); return res({ error: null }); }
+    return res(this.o?.head ? { count: rs.length } : { data: this.um ? rs[0] ?? null : rs }); }
 }
 globalThis.__db = { from: t => new Q(t), auth: { getUser: async () => ({ data: { user: { email: 'sa@x.com', factors: [] } } }) } };
 
@@ -39,8 +45,11 @@ globalThis.__db = { from: t => new Q(t), auth: { getUser: async () => ({ data: {
 const pushes = [];
 globalThis.__webpush = { importVapidKeys: async () => ({}), exportApplicationServerKey: async () => 'pub',
   ApplicationServer: { new: async () => ({ subscribe: () => ({ pushTextMessage: async m => pushes.push(JSON.parse(m)) }) }) } };
-let pedido, resposta;
+let pedido, resposta, googleOk = true, geminiStatus = 200;
 globalThis.fetch = async (url, init = {}) => {
+  if (String(url).includes('oauth2.googleapis.com')) return new Response(JSON.stringify(googleOk ? { access_token: 'at' } : { error: 'invalid_grant' }), { status: googleOk ? 200 : 400 });
+  if (String(url).includes('calendarList')) return new Response('{}');
+  if (String(url).includes('generativelanguage') && geminiStatus !== 200) return new Response(JSON.stringify({ error: { code: geminiStatus, message: 'Your prepayment credits are depleted.' } }), { status: geminiStatus });
   if (String(url).includes('generativelanguage')) { pedido = JSON.parse(init.body); return new Response(JSON.stringify(resposta)); }
   throw new Error('fetch inesperado: ' + url);
 };
@@ -98,5 +107,27 @@ T.crm_parcelas[0].pago_em = dia(0); T.crm_propostas[0].status = 'aprovada'; T.cr
 pushes.length = 0; await cron();
 ok(!pushes.some(p => p.title === 'Precisa da sua atenção'), 'nada parado: não manda o aviso de atenção');
 ok((await chamar({}, { 'x-cron': 'errada' })).status === 401, 'cron com chave errada: recusado');
+
+// 3) verificação a cada 6 h
+const velho = new Date(Date.now() - 5 * 864e5).toISOString();
+T.crm_google = [{ id: 1, refresh_token: 'rt' }];
+T.crm_falhas = [{ id: 'f1', origem: 'crm-google', mensagem: 'Sem permissão', resolvida: false, quando: velho }, { id: 'f2', origem: 'drive', mensagem: 'x', resolvida: false, quando: velho },
+  { id: 'f3', origem: 'crm-assistente', mensagem: 'falta chave', resolvida: false, quando: velho }, { id: 'f4', origem: 'tela', mensagem: 'erro velho', resolvida: false, quando: velho },
+  { id: 'f5', origem: 'tela', mensagem: 'erro de hoje', resolvida: false, quando: new Date().toISOString() }, { id: 'f6', origem: 'agenda', mensagem: 'conflito', resolvida: false, quando: velho },
+  { id: 'f7', origem: 'backup', mensagem: 'backup falhou', resolvida: false, quando: velho }];
+const verif = () => chamar({ verificar: true }, { 'x-cron': 'k' });
+const abertas = () => T.crm_falhas.filter(f => !f.resolvida).map(f => f.id).sort().join();
+let v = await verif();
+ok(v.google === true && v.ia === true, 'verificação: Google e Gemini respondendo');
+ok(abertas() === 'f5,f6,f7', `tudo bem: some Google, Drive, Assistente e erro de tela antigo; fica erro de hoje, conflito de agenda e backup → ${abertas()}`);
+ok(T.crm_falhas.length === 7, 'nada é apagado do banco (só marcado como resolvido)');
+ok((await chamar({ verificar: true }, { 'x-cron': 'errada' })).status === 401, 'verificação com chave errada: recusada');
+googleOk = false; geminiStatus = 402;
+v = await verif(); await verif();
+const novas = T.crm_falhas.filter(f => f.acao === 'verificação automática');
+ok(novas.length === 2 && novas.some(f => f.origem === 'crm-google' && /Reconectar/.test(f.mensagem)) && novas.some(f => f.origem === 'crm-assistente' && /créditos do Gemini acabaram/.test(f.mensagem)),
+  `quebrou: um aviso por problema, sem repetir a cada 6 h → ${novas.map(f => f.mensagem.slice(0, 40)).join(' | ')}`);
+googleOk = true; geminiStatus = 200; await verif();
+ok(!T.crm_falhas.some(f => f.acao === 'verificação automática' && !f.resolvida), 'voltou a funcionar: o aviso some sozinho');
 
 console.log('ERROS:', erros.length ? erros : 'nenhum'); process.exit(erros.length ? 1 : 0);

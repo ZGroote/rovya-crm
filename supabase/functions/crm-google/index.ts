@@ -97,6 +97,7 @@ async function backupSemanal() {
   const l = await (await fetch(`${DRIVE}?${new URLSearchParams({ q, orderBy: 'createdTime desc', fields: 'files(id)', pageSize: '100' })}`, { headers: auth })).json().catch(() => ({}));
   for (const velho of (l.files ?? []).slice(MANTER))
     await fetch(`${DRIVE}/${velho.id}`, { method: 'PATCH', headers: { ...auth, 'Content-Type': 'application/json' }, body: JSON.stringify({ trashed: true }) });
+  await db.from('crm_falhas').update({ resolvida: true }).eq('origem', 'backup').eq('resolvida', false);   // backup feito: as falhas de backup anteriores saem da tela (ficam no banco)
   return { ok: true, arquivo: f.name, bytes: corpo.length };
 }
 

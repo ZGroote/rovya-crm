@@ -19,6 +19,11 @@ Site estático (HTML + JS, sem build) com dados no Supabase, projeto **rovya-sti
 - `producao.js`: tela **Produção**, um quadro com todas as peças (entregas) dos projetos ativos por status (arrastar muda o status). Cada peça tem **formato**, contador de **revisões** (R2 = voltou duas vezes) e data de **aprovação**, que o trigger `crm_entrega` preenche a partir do status escolhido pela Sabrina (`supabase/010_producao.sql`).
 - **Encerrar projeto** (botão no projeto): lista as pendências (peças, tarefas, valores a receber, contratos vigentes), baixa o CSV de entregáveis, pede a retenção e só arquiva com confirmação. "Arquivado" não apaga nada.
 - **Falhas de integração:** erros do Drive, do Google e do Assistente vão para `crm_falhas` e aparecem em Configurações até serem marcados como resolvidos.
+- **Verificação automática a cada 6 h** (pg_cron `crm-verificacao`, `supabase/016_verificacao.sql`): a `crm-assistente` testa o Google (renova o acesso e lê as agendas) e o Gemini (uma pergunta mínima, que também detecta créditos acabados).
+  - Funcionando: as falhas de `crm-google`, `drive` e `crm-assistente` são marcadas como resolvidas. Nada é apagado, e o `crm_log` guarda quem marcou.
+  - Quebrado: entra um aviso só, sem repetir a cada 6 h, e ele sai sozinho quando volta a funcionar.
+  - Erros de tela saem depois de 3 dias. Falhas de backup saem quando um backup seguinte dá certo. Conflitos de agenda (`agenda`) esperam a Sabrina.
+- **Duas contas de administrador:** rovyacreative@ (Sabrina) e jaogroote@ (manutenção). A verificação em duas etapas vale por conta, então se a Sabrina ativar na dela, a de manutenção continua entrando só com a senha.
 - `config.js`: endereço e chave publicável do Supabase. Quem protege os dados é o RLS.
 - `supabase/001_crm.sql`: tabelas, RLS, bucket privado `crm-anexos` e a função `crm_projeto_de_modelo`. Já foi aplicado.
 - `supabase/002_seed.sql`: modelo de projeto “Gestão estratégica da comunicação”, com as 6 etapas do Trello da Conecta, as orientações e 29 entregas. Já foi aplicado.

@@ -51,12 +51,15 @@ addEventListener('unhandledrejection', e => registrarErro(e.reason?.message || e
 
 /* ---------- roteador ---------- */
 const rotas = { '': inicio, funil, clientes, cliente, projetos, projeto, producao: () => producao(abrirEntrega), financeiro, agenda, modelos, assistente, servicos, propostas, proposta, contratos, contrato, documentos, tarefas, configuracoes, relatorios };
+let navegacao = 0;   // cada troca de tela ganha um número: tela antiga que termina depois não mexe na nova
 async function rotear() {
+  const vez = ++navegacao;
   const [r, id] = location.hash.replace(/^#\/?/, '').split('/');
   const fn = rotas[r] || inicio;
   document.querySelectorAll('#nav a').forEach(a => a.classList.toggle('on', a.dataset.r === (r || 'inicio') || (a.dataset.r + 's') === r || (r === 'cliente' && a.dataset.r === 'clientes') || (r === 'projeto' && a.dataset.r === 'projetos') || (r === 'proposta' && a.dataset.r === 'propostas') || (r === 'contrato' && a.dataset.r === 'contratos')));
   main.innerHTML = '<p class="vazio">Carregando…</p>';
   try { await fn(id); } catch (e) {
+    if (vez !== navegacao) return;   // ela já foi para outra tela antes desta terminar de carregar: o erro não é da tela atual
     console.error(e); registrarErro(e.message, 'ao abrir a tela');
     main.innerHTML = `<p class="vazio">${semRede(e) ? 'Sem internet, e esta tela ainda não tinha sido aberta neste aparelho, então não há cópia salva dela.' : 'Não consegui carregar: ' + esc(e.message)}</p>`;
   }
@@ -635,6 +638,7 @@ async function agenda() {
   const pend = lerFila().map(p => ({ ...p.evento, pendente: true, erro: p.erro, _agenda: p.agenda || 'profissional', _tipo: p.agenda === 'pessoal' ? 'pessoal' : 'profissional' }));
   let r; try { r = await google('listar', { de: de.toISOString(), ate: ate.toISOString() }); }
   catch (e) { r = { falhou: semRede(e) ? 'Sem internet e sem cópia salva da agenda. Os compromissos marcados neste aparelho aparecem abaixo.' : e.message, eventos: [] }; }
+  if (!$('#agSub')) return;   // saiu da Agenda enquanto o Google respondia
   const reconectar = async () => { const { url } = await google('url', { volta: location.href.split('#')[0] + '#/agenda' }); location.href = url; };
   if (r.conectado === false) {
     $('#agSub').textContent = 'Conecte a conta Google da Rovya para ver e criar compromissos daqui.';

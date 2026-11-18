@@ -246,6 +246,43 @@ async function notificar(titulo: string, corpo: string, url = '#/assistente') {
   return { enviadas: ok, removidas, total: subs?.length ?? 0 };
 }
 
+/* ---------- verificação a cada 6 h (pg_cron crm-verificacao, 016_verificacao.sql) ----------
+   Testa o Google (renova o acesso e lê a lista de agendas) e o Gemini (uma pergunta mínima, que também mostra se os créditos acabaram).
+   Funcionando: as falhas daquela origem saem da tela (resolvida = true; a linha continua no banco e o crm_log guarda a mudança).
+   Quebrado: vira um aviso só, sem repetir a cada 6 h. Erros de código (origem 'tela', para quem mantém o CRM) saem depois de 3 dias.
+   'agenda' (conflitos de compromissos) e 'backup' não entram: a primeira pede ação dela, a segunda sai quando um backup der certo. */
+const GRUPOS: Record<string, string[]> = { google: ['crm-google', 'drive'], ia: ['crm-assistente'] };
+async function verificacao() {
+  const res: Record<string, string | true> = {};
+  const { data: g } = await db.from('crm_google').select('refresh_token').eq('id', 1).maybeSingle();
+  if (!g?.refresh_token) res.google = 'O Google da Rovya não está conectado: Agenda, Drive, Gmail e backup param. Em Agenda → Conectar Google Agenda.';
+  else {
+    const t = await (await fetch('https://oauth2.googleapis.com/token', { method: 'POST',
+      body: new URLSearchParams({ client_id: env('GOOGLE_CLIENT_ID'), client_secret: env('GOOGLE_CLIENT_SECRET'), refresh_token: g.refresh_token, grant_type: 'refresh_token' }) })).json().catch(() => ({}));
+    if (!t.access_token) res.google = 'O Google parou de aceitar a conexão do CRM. Em Agenda → Reconectar Google.';
+    else {
+      const c = await fetch('https://www.googleapis.com/calendar/v3/users/me/calendarList?maxResults=1', { headers: { Authorization: 'Bearer ' + t.access_token } });
+      res.google = c.ok || `O Google Agenda respondeu com erro (${c.status}) na verificação automática.`;
+    }
+  }
+  if (!env('GEMINI_API_KEY')) res.ia = 'O Assistente está sem a chave do Gemini (GEMINI_API_KEY nos secrets do Supabase).';
+  else {
+    const m = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${MODELO}:generateContent`, { method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': env('GEMINI_API_KEY') },
+      body: JSON.stringify({ contents: [{ role: 'user', parts: [{ text: 'ok' }] }], generationConfig: { maxOutputTokens: 16 } }) });
+    const erro = m.ok ? '' : String((await m.json().catch(() => ({})))?.error?.message ?? '');
+    res.ia = m.ok || (m.status === 402 || /credit/i.test(erro) ? 'Os créditos do Gemini acabaram: o Assistente parou. No AI Studio → Projetos → CRM SA → Comprar créditos.'
+      : `O Gemini recusou a verificação automática (${m.status}).`);
+  }
+  for (const [k, origens] of Object.entries(GRUPOS)) {
+    if (res[k] === true) { await db.from('crm_falhas').update({ resolvida: true }).eq('resolvida', false).in('origem', origens); continue; }
+    const { data: ja } = await db.from('crm_falhas').select('id').eq('resolvida', false).eq('origem', origens[0]).eq('mensagem', res[k]).limit(1);
+    if (!ja?.length) await db.from('crm_falhas').insert({ origem: origens[0], acao: 'verificação automática', mensagem: res[k] });
+  }
+  await db.from('crm_falhas').update({ resolvida: true }).eq('resolvida', false).eq('origem', 'tela').lt('quando', new Date(Date.now() - 3 * 864e5).toISOString());
+  return res;
+}
+
 async function eAdmin(req: Request) {
   const t = req.headers.get('Authorization')?.replace(/^Bearer /, '');
   if (!t) return false;
@@ -265,7 +302,8 @@ Deno.serve(async req => {
       const { data } = await db.from('crm_config').select('valor').eq('chave', 'cron_key').maybeSingle();
       if (!data?.valor || cron !== data.valor) return json({ erro: 'Sem permissão' }, 401);
       // aviso avulso de outra função (ex.: crm-agendar quando alguém marca pelo site); sem aviso, é o resumo das 7h30
-      const { aviso } = await req.json().catch(() => ({}));
+      const { aviso, verificar } = await req.json().catch(() => ({}));
+      if (verificar) return json(await verificacao());
       if (aviso?.titulo) return json(await notificar(String(aviso.titulo).slice(0, 80), String(aviso.corpo || '').slice(0, 200), String(aviso.url || '').startsWith('app.html#/') ? String(aviso.url).slice(8) : '#/agenda'));
       const r = await retrato(), enviados = [await notificar('Bom dia, Sabrina! ☀️', resumoCurto(r))];
       const al = await alertas(r);
