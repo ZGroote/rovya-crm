@@ -22,6 +22,7 @@ class Q {
   delete() { this.op = 'delete'; return this; }
   eq(k, v) { this.f.push(r => r[k] === v); return this; }
   gte(k, v) { this.f.push(r => r[k] >= v); return this; }
+  like(k, v) { const x = v.replace(/%$/, ''); this.f.push(r => (r[k] || '').startsWith(x)); return this; }
   ilike(k, v) { const x = v.replace(/\\(.)/g, '$1').toLowerCase(); this.f.push(r => (r[k] || '').toLowerCase() === x); return this; }
   not(k, _op, lista) { const l = lista.replace(/[()]/g, '').split(','); this.f.push(r => !l.includes(r[k])); return this; }
   limit() { return this; }
@@ -120,6 +121,21 @@ ok(r.status === 429, 'mais de 3 tentativas do mesmo lugar no dia são barradas')
 const semGoogle = T.crm_google.splice(0);
 ok(JSON.stringify((await chamar({ acao: 'horarios' })).horarios) === '[]', 'Google desconectado: lista vazia (a página manda para o Instagram)');
 T.crm_google.push(...semGoogle);
+
+// 6) assistente do site: "deixar meu contato" (não depende do Google)
+const guardado = T.crm_google.splice(0); avisos.length = 0;
+const nCli = T.crm_clientes.length, nInt = T.crm_interacoes.length;
+ok((await chamar({ acao: 'contato', nome: 'Robô', contato: 'a@b.com', site: 'x' })).ok && T.crm_interacoes.length === nInt, 'contato: robô (campo escondido) não grava');
+ok((await chamar({ acao: 'contato', nome: 'Zé', contato: '1234' })).status === 400, 'contato: sem WhatsApp com DDD nem e-mail é recusado');
+r = await chamar({ acao: 'contato', nome: 'Ana', contato: 'ANA@exemplo.com', mensagem: 'Quero saber mais', pagina: '/' });
+const ultima = T.crm_interacoes.at(-1);
+ok(r.ok && T.crm_clientes.length === nCli && ultima.cliente_id === 'c1' && ultima.tipo === 'mensagem' && ultima.resumo.startsWith('Pelo chat do site (/): pediu retorno por e-mail') && ultima.resumo.includes('Quero saber mais'), 'contato: e-mail de cliente que já existe vai para o histórico dela, mesmo sem Google');
+ok(avisos.at(-1)?.aviso.titulo.startsWith('Novo contato pelo site') && avisos.at(-1).aviso.url === 'app.html#/cliente/c1', 'contato: Sabrina recebe aviso que abre a ficha da pessoa');
+r = await chamar({ acao: 'contato', nome: 'Caio Reis', contato: '(61) 98888-7777' });
+ok(r.ok && T.crm_clientes.at(-1).nome === 'Caio Reis' && T.crm_clientes.at(-1).telefone === '(61) 98888-7777' && T.crm_clientes.at(-1).origem === 'Chat do site', 'contato: WhatsApp novo vira cliente com origem “Chat do site”');
+for (let i = 0; i < 40; i++) T.crm_interacoes.push({ id: 'z' + i, resumo: 'Pelo chat do site: x', criado_em: new Date().toISOString() });
+ok((await chamar({ acao: 'contato', nome: 'Muitos', contato: 'm@m.com' })).status === 429, 'contato: limite diário contra spam');
+T.crm_google.push(...guardado);
 
 console.log('ERROS:', erros.length ? erros : 'nenhum');
 process.exit(erros.length ? 1 : 0);

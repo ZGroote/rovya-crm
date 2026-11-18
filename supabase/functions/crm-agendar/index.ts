@@ -5,6 +5,8 @@
 // POST {acao:'reservar', inicio, nome, email, telefone, empresa, mensagem} → confere de novo, grava em crm_agendamentos
 //   (índice único: ninguém pega o mesmo horário), cadastra/acha o cliente, cria a reunião com Google Meet e convite
 //   para a pessoa, e avisa a Sabrina no celular.
+// POST {acao:'contato', nome, contato (WhatsApp ou e-mail), mensagem, pagina} → assistente do site (site/assistente.js):
+//   acha/cadastra o cliente (origem "Chat do site"), registra a mensagem no histórico e avisa a Sabrina. Não depende do Google.
 // Deploy com verify_jwt = false.
 import { createClient } from 'jsr:@supabase/supabase-js@2';
 
@@ -57,6 +59,34 @@ async function livres(g: NonNullable<Awaited<ReturnType<typeof google>>>) {
   return [...slots].sort((a, b) => a[0] - b[0]).map(([s, f]) => ({ inicio: new Date(s).toISOString(), fim: new Date(f).toISOString() }));
 }
 
+// aviso no celular da Sabrina (pela função do assistente, que guarda as inscrições de notificação)
+async function avisar(titulo: string, corpo: string, url: string) {
+  const { data: k } = await db.from('crm_config').select('valor').eq('chave', 'cron_key').maybeSingle();
+  if (k?.valor) await fetch(`${SUPA}/functions/v1/crm-assistente`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-cron': k.valor },
+    body: JSON.stringify({ aviso: { titulo, corpo, url } }) }).catch(() => { });
+}
+const txt = (v: unknown, max: number) => String(v ?? '').trim().slice(0, max);
+const EMAIL = /^[^@\s,;<>]+@[^@\s,;<>]+\.[^@\s,;<>]+$/;
+const semCuringa = (s: string) => s.replace(/[%_\\]/g, '\\$&'); // e-mail no ilike: _ e % são literais
+const CHAT_POR_DIA = 40;
+
+async function contato(b: Record<string, unknown>): Promise<[unknown, number]> {
+  if (b.site) return [{ ok: true }, 200]; // campo escondido preenchido: robô
+  const nome = txt(b.nome, 120), contato = txt(b.contato, 160), mensagem = txt(b.mensagem, 1500), pagina = txt(b.pagina, 60);
+  if (nome.length < 2) return [{ erro: 'Como posso te chamar?' }, 400];
+  const email = EMAIL.test(contato) ? contato.toLowerCase() : null;
+  if (!email && contato.replace(/\D/g, '').length < 10) return [{ erro: 'Deixe um WhatsApp com DDD ou um e-mail.' }, 400];
+  const { count } = await db.from('crm_interacoes').select('id', { count: 'exact', head: true }).like('resumo', 'Pelo chat do site%').gte('criado_em', new Date(Date.now() - 864e5).toISOString());
+  if ((count ?? 0) >= CHAT_POR_DIA) return [{ erro: 'Muitos contatos por aqui hoje.' }, 429];
+  let cli = email ? (await db.from('crm_clientes').select('id').ilike('email', semCuringa(email)).limit(1).maybeSingle()).data : null;
+  if (!cli) cli = (await db.from('crm_clientes').insert({ nome, email, telefone: email ? null : contato, origem: 'Chat do site' }).select('id').single()).data;
+  if (!cli) return [{ erro: 'Não consegui enviar agora.' }, 500];
+  await db.from('crm_interacoes').insert({ cliente_id: cli.id, tipo: 'mensagem',
+    resumo: `Pelo chat do site${pagina ? ` (${pagina})` : ''}: pediu retorno por ${email ? 'e-mail' : 'WhatsApp'} (${contato}).${mensagem ? `\n\n${mensagem}` : ''}` });
+  await avisar('Novo contato pelo site ✦', `${nome} · ${contato}${mensagem ? ` · “${mensagem.slice(0, 80)}”` : ''}`, `app.html#/cliente/${cli.id}`);
+  return [{ ok: true }, 200];
+}
+
 const quandoBR = (iso: string) => new Date(iso).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo', weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' });
 
 Deno.serve(async req => {
@@ -65,6 +95,7 @@ Deno.serve(async req => {
   if (req.method !== 'POST') return json({ erro: 'Use POST' }, 405);
   try {
     const b = await req.json().catch(() => ({}));
+    if (b.acao === 'contato') { const [o, s] = await contato(b); return json(o, s); }
     const g = await google();
     if (!g) return json({ horarios: [], fechado: true });
     if (b.acao === 'horarios') return json({ horarios: await livres(g) });
@@ -72,10 +103,9 @@ Deno.serve(async req => {
 
     // ---- reservar ----
     if (b.site) return json({ ok: true }); // campo escondido preenchido: robô
-    const txt = (v: unknown, max: number) => String(v ?? '').trim().slice(0, max);
     const nome = txt(b.nome, 120), email = txt(b.email, 160).toLowerCase(), telefone = txt(b.telefone, 40), empresa = txt(b.empresa, 120), mensagem = txt(b.mensagem, 2000);
     if (nome.length < 2) return json({ erro: 'Escreva seu nome.' }, 400);
-    if (!/^[^@\s,;<>]+@[^@\s,;<>]+\.[^@\s,;<>]+$/.test(email)) return json({ erro: 'Confira o e-mail: é por ele que chega o convite.' }, 400);
+    if (!EMAIL.test(email)) return json({ erro: 'Confira o e-mail: é por ele que chega o convite.' }, 400);
     const ip = (req.headers.get('x-forwarded-for') || '').split(',')[0].trim() || null;
     if (ip) {
       const { count } = await db.from('crm_agendamentos').select('id', { count: 'exact', head: true }).eq('ip', ip).gte('criado_em', new Date(Date.now() - 864e5).toISOString());
@@ -101,7 +131,7 @@ Deno.serve(async req => {
     if (error || !ag) return json({ erro: 'Não consegui confirmar agora. Tente de novo em instantes.' }, 500);
 
     // cliente: acha pelo e-mail ou cadastra como novo contato vindo da agenda do site
-    let { data: cli } = await db.from('crm_clientes').select('id').ilike('email', email.replace(/[%_\\]/g, '\\$&')).limit(1).maybeSingle();
+    let { data: cli } = await db.from('crm_clientes').select('id').ilike('email', semCuringa(email)).limit(1).maybeSingle();
     if (!cli) ({ data: cli } = await db.from('crm_clientes').insert({ nome, empresa: empresa || null, email, telefone: telefone || null, origem: 'Agenda do site' }).select('id').single());
     const quando = quandoBR(slot.inicio);
 
@@ -127,10 +157,7 @@ Deno.serve(async req => {
       const { data: aberta } = await db.from('crm_oportunidades').select('id').eq('cliente_id', cli.id).not('etapa', 'in', '(ganho,perdido)').limit(1).maybeSingle();
       if (!aberta) await db.from('crm_oportunidades').insert({ cliente_id: cli.id, titulo: 'Primeira conversa (agenda do site)', etapa: 'contato', proximo_passo: 'Primeira conversa', proximo_em: slot.inicio.slice(0, 10) });
     }
-    // aviso no celular da Sabrina (pela função do assistente, que guarda as inscrições de notificação)
-    const { data: k } = await db.from('crm_config').select('valor').eq('chave', 'cron_key').maybeSingle();
-    if (k?.valor) await fetch(`${SUPA}/functions/v1/crm-assistente`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-cron': k.valor },
-      body: JSON.stringify({ aviso: { titulo: 'Novo agendamento pelo site ✦', corpo: `${nome}${empresa ? ` (${empresa})` : ''} · ${quando}`, url: 'app.html#/agenda' } }) }).catch(() => { });
+    await avisar('Novo agendamento pelo site ✦', `${nome}${empresa ? ` (${empresa})` : ''} · ${quando}`, 'app.html#/agenda');
 
     return json({ ok: true, inicio: slot.inicio, fim: slot.fim, quando, meet: ev.hangoutLink ?? null });
   } catch (e) {
