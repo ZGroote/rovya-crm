@@ -137,5 +137,17 @@ for (let i = 0; i < 40; i++) T.crm_interacoes.push({ id: 'z' + i, resumo: 'Pelo 
 ok((await chamar({ acao: 'contato', nome: 'Muitos', contato: 'm@m.com' })).status === 429, 'contato: limite diário contra spam');
 T.crm_google.push(...guardado);
 
+// 4) Horários da semana do CRM: o site só oferece Rovya; Pessoal e BNI bloqueiam, mesmo caindo dentro de um período Rovya
+G.prof = [ev('s1', BR(5, '09:00'), BR(5, '12:00'), { transparency: 'transparent', extendedProperties: { private: res } }),            // Rovya 9h–12h
+  ev('s2', BR(5, '10:00'), BR(5, '11:00'), { summary: 'BNI', extendedProperties: { private: { crm_bloco: 'bni' } } }),                // BNI dentro do Rovya
+  ev('s3', BR(6, '09:00'), BR(6, '11:00'), { summary: 'BNI', extendedProperties: { private: { crm_bloco: 'bni' } } }),                // BNI sozinho
+  ev('s4', BR(6, '14:00'), BR(6, '15:00'), { summary: 'Pessoal', visibility: 'private', extendedProperties: { private: { crm_bloco: 'pessoal' } } })]; // Pessoal na profissional (sem agenda pessoal)
+G.pes = [ev('s5', BR(5, '11:00'), BR(5, '12:00'), { summary: 'Pessoal', extendedProperties: { private: { crm_bloco: 'pessoal' } } })]; // Pessoal dentro do Rovya
+mostrarCriados = false;
+h = await chamar({ acao: 'horarios' }, '9.9.9.1');
+ok(JSON.stringify(h.horarios.map(x => x.inicio)) === JSON.stringify([BR(5, '09:00')]), `só a hora Rovya livre aparece (10h é BNI, 11h é Pessoal; BNI e Pessoal sozinhos nunca aparecem) → ${h.horarios.map(x => x.inicio).join(', ')}`);
+ok((await chamar({ acao: 'reservar', inicio: BR(5, '10:00'), nome: 'Bia', email: 'bia@exemplo.com' }, '9.9.9.2')).status === 409, 'não dá para reservar no horário do BNI, nem mandando direto para a função');
+ok((await chamar({ acao: 'reservar', inicio: BR(6, '14:00'), nome: 'Bia', email: 'bia@exemplo.com' }, '9.9.9.3')).status === 409, 'nem no horário Pessoal');
+
 console.log('ERROS:', erros.length ? erros : 'nenhum');
 process.exit(erros.length ? 1 : 0);
