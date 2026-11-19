@@ -51,7 +51,7 @@ async function retrato() {
     agenda(14),
     db.from('crm_contratos').select('titulo,tipo,status,inicio,fim,valor_mensal,valor_avulso,renovacao_auto,aviso_dias,crm_clientes(nome,empresa)')
       .or(`status.in.(rascunho,assinatura,vigente),fim.gte.${desde}`).order('fim'),
-    db.from('crm_tarefas').select('titulo,prioridade,prazo,status,concluida_em,crm_projetos(nome)').neq('status', 'feita').order('prazo'),
+    db.from('crm_tarefas').select('titulo,prioridade,prazo,status,concluida_em,lembrete,lembrete_enviado,crm_projetos(nome)').neq('status', 'feita').order('prazo'),
     db.from('crm_interacoes').select('tipo,resumo,data,crm_clientes(nome,empresa)').order('data', { ascending: false }).limit(40),
     db.from('crm_propostas').select('id,grupo,titulo,versao,status,valor,validade,enviada_em,crm_clientes(nome,empresa)')
       .or(`status.in.(rascunho,enviada),criado_em.gte.${desde}`).order('versao', { ascending: false }),
@@ -68,6 +68,7 @@ async function retrato() {
   return {
     hoje: new Date().toLocaleDateString('pt-BR', { timeZone: TZ, weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }),
     hoje_iso: hojeSP(),
+    agora: new Date().toLocaleTimeString('pt-BR', { timeZone: TZ, hour: '2-digit', minute: '2-digit' }), // "daqui 2 horas"
     clientes: (cli.data ?? []).map(c => ({ id: c.id, codigo: c.codigo, nome: c.nome, empresa: c.empresa, origem: c.origem, desde: c.criado_em?.slice(0, 10) })),
     funil: (ops.data ?? []).map((o: any) => ({ id: o.id, cliente_id: o.cliente_id, cliente: quem(o.crm_clientes), oportunidade: o.titulo, etapa: o.etapa, valor: o.valor, proximo_passo: o.proximo_passo, proximo_em: o.proximo_em, motivo_perda: o.motivo_perda, atualizado: o.atualizado_em?.slice(0, 10) })),
     projetos: (projs.data ?? []).map((p: any) => ({ id: p.id, nome: p.nome, cliente: quem(p.crm_clientes), status: p.status, valor: p.valor, inicio: p.inicio, entrega_prevista: p.entrega_prevista,
@@ -77,7 +78,8 @@ async function retrato() {
     lancamentos: (parc.data ?? []).map((x: any) => ({ id: x.id, tipo: x.tipo, categoria: x.categoria, projeto: x.crm_projetos?.nome, descricao: x.descricao, valor: x.valor, vencimento: x.vencimento, pago_em: x.pago_em, forma: x.forma })),
     contratos: (contr.data ?? []).map((x: any) => ({ cliente: quem(x.crm_clientes), titulo: x.titulo, tipo: x.tipo, status: x.status, inicio: x.inicio, fim: x.fim,
       valor_mensal: x.valor_mensal, valor_avulso: x.valor_avulso, renovacao_auto: x.renovacao_auto, aviso_dias: x.aviso_dias })),
-    tarefas_abertas: (tars.data ?? []).map((t: any) => ({ titulo: t.titulo, prioridade: t.prioridade, prazo: t.prazo, status: t.status, projeto: t.crm_projetos?.nome })),
+    tarefas_abertas: (tars.data ?? []).map((t: any) => ({ titulo: t.titulo, prioridade: t.prioridade, prazo: t.prazo, status: t.status, projeto: t.crm_projetos?.nome,
+      lembrete: t.lembrete && !t.lembrete_enviado ? new Date(t.lembrete).toLocaleString('pt-BR', { timeZone: TZ, day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : undefined })),
     historico_contatos: (hist.data ?? []).map((h: any) => ({ cliente: quem(h.crm_clientes), tipo: h.tipo, data: h.data, resumo: h.resumo })),
     propostas: [...ultimas.values()].map((p: any) => ({ id: p.id, cliente: quem(p.crm_clientes), titulo: p.titulo, versao: p.versao, status: p.status, valor: p.valor, validade: p.validade, enviada_em: p.enviada_em })),
     agenda_14_dias: ag ?? 'Google Agenda não conectado',
@@ -105,7 +107,7 @@ function resumoCurto(r: any) {
 const SISTEMA = `Você é a assistente pessoal da Sabrina, dona da Rovya Creative (consultoria de posicionamento e gestão estratégica da comunicação).
 Você conversa com ela dentro do CRM da Rovya, como num chat de celular: português do Brasil, tom próximo e elegante, respostas curtas e diretas, com poucos emojis e listas curtas quando ajudar.
 Responda só com base nos DADOS DO CRM abaixo. Se algo não estiver nos dados, diga que não encontrou no CRM em vez de inventar. Valores em reais (R$), datas no formato brasileiro.
-AÇÕES: quando ela pedir para FAZER algo, use as ferramentas (pode usar mais de uma): criar tarefa, anotar contato no histórico, mover no funil, marcar lançamento como pago, agendar compromisso (com Meet e convite), escrever e-mail, escrever WhatsApp, rascunho de proposta. Você só PROPÕE: o CRM mostra um cartão e nada acontece até ela confirmar, então proponha sem pedir licença antes e diga em uma frase o que preparou. Use sempre os ids que estão nos DADOS (nunca invente id; se não achar o cliente ou o registro, pergunte). Datas YYYY-MM-DD; horas HH:MM no horário de Brasília; "amanhã", "sexta" etc. contam a partir de hoje_iso. Para mudar algo que as ferramentas não cobrem, explique onde fazer no CRM.
+AÇÕES: quando ela pedir para FAZER algo, use as ferramentas (pode usar mais de uma): criar tarefa, anotar contato no histórico, mover no funil, marcar lançamento como pago, agendar compromisso (com Meet e convite), escrever e-mail, escrever WhatsApp, rascunho de proposta. Você só PROPÕE: o CRM mostra um cartão e nada acontece até ela confirmar, então proponha sem pedir licença antes e diga em uma frase o que preparou. Use sempre os ids que estão nos DADOS (nunca invente id; se não achar o cliente ou o registro, pergunte). Datas YYYY-MM-DD; horas HH:MM no horário de Brasília; "amanhã", "sexta" etc. contam a partir de hoje_iso, e "daqui 2 horas" a partir de agora. "Me lembra de…" / "me avisa…" = criar tarefa com lembrete (se ela não disser a hora, use 09:00 do dia; se não disser o dia, pergunte). Para mudar algo que as ferramentas não cobrem, explique onde fazer no CRM.
 Textos de e-mail, WhatsApp e proposta: escreva completos, prontos para enviar, na voz da Sabrina (primeira pessoa, próxima, elegante, sem exagero nem clichê de marketing), usando o que os DADOS dizem do cliente. Ideias de pauta, legendas e roteiros: responda em texto, sem ferramenta.
 TELA ABERTA: quando vier, é o que ela está vendo no CRM agora; "aqui", "ela", "esse cliente" se referem a isso.
 Se ela perguntar o que você sabe fazer: responder sobre o CRM, fazer as ações acima com confirmação, escrever textos e avisar no celular (resumo às 7h30, o que precisa de atenção e, às sextas, como foi a semana).
@@ -121,7 +123,8 @@ const S = (description: string, x: Record<string, unknown> = {}) => ({ type: 'st
 const obj = (properties: Record<string, unknown>, required: string[]) => ({ type: 'object',
   properties: { rotulo: S('frase curta para o cartão de confirmar, ex.: "Tarefa: ligar para a Marina (sex, 20/11)"'), ...properties }, required: ['rotulo', ...required] });
 const FERRAMENTAS = [
-  { name: 'criar_tarefa', description: 'Propõe uma tarefa nova.', parameters: obj({ titulo: S('título da tarefa'), descricao: S('detalhes (opcional)'), prazo: S('YYYY-MM-DD'),
+  { name: 'criar_tarefa', description: 'Propõe uma tarefa nova; com lembrete, chega uma notificação no celular e no computador dela no dia e hora.', parameters: obj({ titulo: S('título da tarefa'), descricao: S('detalhes (opcional)'), prazo: S('YYYY-MM-DD'),
+    lembrete: S('quando avisar: YYYY-MM-DDTHH:MM no horário de Brasília (opcional; use quando ela pedir para lembrar ou avisar)'),
     prioridade: S('prioridade', { enum: ['baixa', 'media', 'alta'] }), cliente_id: S('id do cliente'), projeto_id: S('id do projeto') }, ['titulo']) },
   { name: 'registrar_contato', description: 'Anota no histórico do cliente (reunião, ligação, mensagem, e-mail, visita ou anotação); com oportunidade, atualiza o próximo passo do funil.',
     parameters: obj({ cliente_id: S('id do cliente'), oportunidade_id: S('id da oportunidade aberta dele (opcional)'), tipo: S('tipo', { enum: ['reuniao', 'ligacao', 'mensagem', 'email', 'visita', 'nota'] }),

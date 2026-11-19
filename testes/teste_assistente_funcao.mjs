@@ -16,7 +16,7 @@ const T = {
   crm_oportunidades: [{ id: 'o1', cliente_id: 'c2', titulo: 'Identidade', etapa: 'proposta', atualizado_em: dia(-30), crm_clientes: { nome: 'Marina' } },
     { id: 'o2', cliente_id: 'c1', titulo: 'Gestão', etapa: 'negociacao', atualizado_em: dia(-1), crm_clientes: { nome: 'Paulo', empresa: 'Horizonte' } }],
   crm_interacoes: [{ id: 'i1', cliente_id: 'c1', data: dia(-2), tipo: 'reuniao', resumo: 'Kickoff' }, { id: 'i2', cliente_id: 'c2', data: dia(-20), tipo: 'mensagem', resumo: 'Mandei a proposta' }],
-  crm_projetos: [], crm_tarefas: [{ id: 't1', status: 'feita', concluida_em: dia(-1) }],
+  crm_projetos: [], crm_tarefas: [{ id: 't1', status: 'feita', concluida_em: dia(-1) }, { id: 't2', titulo: 'Pagar DAS', status: 'a_fazer', lembrete: '2026-11-20T13:00:00Z', lembrete_enviado: null }],
   crm_parcelas: [{ id: 'p1', tipo: 'receita', valor: 2000, vencimento: dia(-3), pago_em: null }, { id: 'p2', tipo: 'receita', valor: 1500, vencimento: dia(-5), pago_em: dia(-2) }],
   crm_contratos: [{ id: 'k1', titulo: 'Gestão', status: 'vigente', fim: dia(20), aviso_dias: 30, crm_clientes: { nome: 'Paulo', empresa: 'Horizonte' } }],
   crm_propostas: [{ id: 'pp1', grupo: 'g1', versao: 1, status: 'enviada', validade: dia(2), crm_clientes: { nome: 'Marina' } }],
@@ -76,6 +76,9 @@ ok(r.acoes[0].args.titulo === 'Ligar para a Marina', 'argumentos da ação chega
 const nomes = pedido.tools[0].functionDeclarations.map(f => f.name);
 ok(['criar_tarefa', 'registrar_contato', 'mover_oportunidade', 'marcar_pago', 'agendar_compromisso', 'escrever_email', 'escrever_whatsapp', 'rascunho_proposta'].every(n => nomes.includes(n)), 'a IA recebe as 8 ferramentas');
 const sis = pedido.systemInstruction.parts[0].text;
+const lemb = pedido.tools[0].functionDeclarations.find(f => f.name === 'criar_tarefa').parameters.properties.lembrete;
+ok(lemb && /YYYY-MM-DDTHH:MM/.test(lemb.description), 'criar tarefa aceita lembrete com dia e hora');
+ok(/"agora":"\d\d:\d\d"/.test(sis) && /"titulo":"Pagar DAS"[^}]*"lembrete":"20\/11, 10:00"/.test(sis), 'a IA sabe a hora de agora e os lembretes marcados (hora de Brasília)');
 ok(/TELA ABERTA:[\s\S]*"tela":"cliente"[\s\S]*"nome":"Paulo"[\s\S]*Kickoff/.test(sis), 'a ficha aberta (e o histórico desse cliente) vai para a IA');
 ok(/"id":"c2"/.test(sis) && /"id":"o1"/.test(sis) && /"id":"p1"/.test(sis), 'os dados levam os ids (para a IA propor ações)');
 ok(!/\n\nTELA ABERTA:\n/.test(((await chamar({ acao: 'chat', mensagens: [{ role: 'user', content: 'oi' }] })), pedido.systemInstruction.parts[0].text)), 'sem tela aberta, não manda nada');

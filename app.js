@@ -874,10 +874,12 @@ const fmtIA = t => esc(t).replace(/\*\*(.+?)\*\*/g, '<b>$1</b>').replace(/^#{1,4
 // a IA só PROPÕE (crm-assistente devolve {nome, args}); cada proposta vira um cartão e só acontece quando ela confirma:
 // abre o formulário de sempre já preenchido (tarefa, contato, compromisso, e-mail, proposta) ou pergunta "confirmar?" (funil, pago)
 const so = o => Object.fromEntries(Object.entries(o).filter(([, v]) => v != null && v !== ''));
+// a IA manda "2026-11-20T14:30" no horário de Brasília; vira instante com fuso (o formulário mostra na hora do aparelho). Data inválida: sem lembrete
+const lembreteIA = x => { const v = /^\d{4}-\d\d-\d\dT\d\d:\d\d$/.test(x || '') ? x + ':00-03:00' : x; return v && !isNaN(Date.parse(v)) ? new Date(v).toISOString() : null; };
 const umRegistro = async (t, id) => id ? q(sb.from(t).select('*').eq('id', id).maybeSingle()) : null;
 const naoAchei = () => { toast('Não achei esse registro no CRM. Peça de novo à assistente.', true); return false; };
 const ACOES_IA = {
-  criar_tarefa: { icone: '✓', verbo: 'Revisar tarefa', fazer: a => novaTarefa(so({ titulo: a.titulo, descricao: a.descricao, prazo: a.prazo, prioridade: a.prioridade, cliente_id: a.cliente_id, projeto_id: a.projeto_id })) },
+  criar_tarefa: { icone: '✓', verbo: 'Revisar tarefa', fazer: a => novaTarefa(so({ titulo: a.titulo, descricao: a.descricao, prazo: a.prazo, prioridade: a.prioridade, cliente_id: a.cliente_id, projeto_id: a.projeto_id, lembrete: lembreteIA(a.lembrete) })) },
   registrar_contato: { icone: '✎', verbo: 'Revisar anotação', fazer: async a => {
     if (!await umRegistro('crm_clientes', a.cliente_id)) return naoAchei();
     return registrarContato(a.cliente_id, await umRegistro('crm_oportunidades', a.oportunidade_id), null, so({ tipo: a.tipo, data: a.data, resumo: a.texto, proximo_passo: a.proximo_passo, proximo_em: a.proximo_em }));
@@ -961,7 +963,7 @@ const CAPACIDADES = [
     ['Escreve um e-mail de retorno para ', 'Uma mensagem de WhatsApp lembrando com carinho da parcela de ', 'Faz um rascunho de proposta para ', 'Me dá 5 ideias de pauta para ']],
   ['Saber onde você está', 'Aberta pela Sabrina do canto numa ficha de cliente, projeto, proposta ou contrato, ela já sabe do que você está falando.',
     ['O que falta aqui?', 'Quando falei com ela pela última vez?']],
-  ['Avisar no celular', `Lembrete de tarefa no dia e hora que você escolher; resumo do dia às 7h30; “precisa da sua atenção” quando um cliente com negociação aberta está há 10 dias sem contato, uma proposta vence em até 3 dias, um contrato entra no prazo de aviso ou uma parcela atrasa; e às sextas, como foi a semana.`, []],
+  ['Avisar no celular', `Lembrete de tarefa no dia e hora que você escolher (ou peça: “me lembra amanhã às 10h de ligar para o Paulo”); resumo do dia às 7h30; “precisa da sua atenção” quando um cliente com negociação aberta está há 10 dias sem contato, uma proposta vence em até 3 dias, um contrato entra no prazo de aviso ou uma parcela atrasa; e às sextas, como foi a semana.`, []],
 ];
 async function assistente() {
   fecharSabrina();
