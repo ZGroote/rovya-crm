@@ -1,4 +1,4 @@
-import { sb, $, main, esc, brl, diaLocal, hoje, dataBR, venceu, toast, q, rotulo, preencher, mdHtml, mdTexto, formulario, confirma, listaClientes, opcoesClientes, funcao, baixarCsv, semRede, sessaoSalva, registrarFalha, anexosGrandes, LIMITE_ANEXO_MB, salvar, comPendentes, campos, lerEscritas, limparEscritas, enviarEscritas, mesesAtras } from './util.js';
+import { sb, $, main, esc, brl, diaLocal, hoje, dataBR, venceu, toast, q, rotulo, preencher, mdHtml, mdTexto, formulario, confirma, listaClientes, opcoesClientes, funcao, avisoNotificacoes, baixarCsv, semRede, sessaoSalva, registrarFalha, anexosGrandes, LIMITE_ANEXO_MB, salvar, comPendentes, campos, lerEscritas, limparEscritas, enviarEscritas, mesesAtras } from './util.js';
 import { producao, STATUS_ENT, FORMATOS, seloPeca } from './producao.js';
 import { servicos, propostas, proposta, novaProposta, propostasDoCliente } from './comercial.js';
 import { contratos, contrato, novoContrato, alertasContratos, contratosDoCliente } from './contratos.js';
@@ -50,13 +50,13 @@ addEventListener('error', e => { // erro de outro endereço (extensão do navega
 addEventListener('unhandledrejection', e => registrarErro(e.reason?.message || e.reason));
 
 /* ---------- roteador ---------- */
-const rotas = { '': inicio, funil, clientes, cliente, projetos, projeto, producao: () => producao(abrirEntrega), financeiro, agenda, modelos, assistente, servicos, propostas, proposta, contratos, contrato, documentos, tarefas, configuracoes, relatorios, links };
+const rotas = { '': inicio, funil, clientes, cliente, projetos, projeto, producao: () => producao(abrirEntrega), financeiro, agenda, modelos, assistente, servicos, propostas, proposta, contratos, contrato, documentos, tarefas, configuracoes, relatorios, links, horarios };
 let navegacao = 0;   // cada troca de tela ganha um número: tela antiga que termina depois não mexe na nova
 async function rotear() {
   const vez = ++navegacao;
   const [r, id] = location.hash.replace(/^#\/?/, '').split('/');
   const fn = rotas[r] || inicio;
-  document.querySelectorAll('#nav a').forEach(a => a.classList.toggle('on', a.dataset.r === (r || 'inicio') || (a.dataset.r + 's') === r || (r === 'cliente' && a.dataset.r === 'clientes') || (r === 'projeto' && a.dataset.r === 'projetos') || (r === 'proposta' && a.dataset.r === 'propostas') || (r === 'contrato' && a.dataset.r === 'contratos')));
+  document.querySelectorAll('#nav a').forEach(a => a.classList.toggle('on', a.dataset.r === (r || 'inicio') || (a.dataset.r + 's') === r || (r === 'cliente' && a.dataset.r === 'clientes') || (r === 'projeto' && a.dataset.r === 'projetos') || (r === 'proposta' && a.dataset.r === 'propostas') || (r === 'contrato' && a.dataset.r === 'contratos') || (r === 'horarios' && a.dataset.r === 'agenda')));
   main.innerHTML = '<p class="vazio">Carregando…</p>';
   try { await fn(id); } catch (e) {
     if (vez !== navegacao) return;   // ela já foi para outra tela antes desta terminar de carregar: o erro não é da tela atual
@@ -573,44 +573,114 @@ async function novoEvento(val = {}, ev = null) {
   fimMsg(ev ? 'Compromisso atualizado' : evento.attendees ? 'Criado no Google Agenda · convite enviado' : 'Criado no Google Agenda'); return true;
 }
 
-// períodos abertos para novos clientes: um evento "Reservado · novos clientes" (livre, crm_reserva=1) na agenda profissional;
-// a página rovyacreative.com.br/agendar divide em conversas de crm_slot minutos e mostra só o que não bate com nada da agenda
-// cada reserva é UMA conversa de 1 hora (14:00 → 15:00). Sem data de repetição, repete toda semana até ela tirar
-// (o site só mostra os próximos 45 dias; quando alguém marca, aquele dia sai sozinho porque a reunião ocupa o horário).
+/* ---------- horários da semana (#/horarios/<semanas à frente>): a Sabrina pinta a semana em vez de criar horário por horário ----------
+   Rovya = período aberto para novos clientes: evento livre (transparent) com crm_reserva=1 na agenda profissional; a página
+   rovyacreative.com.br/agendar divide em conversas de crm_slot minutos e só mostra o que não bate com nada da agenda.
+   Pessoal e BNI só ocupam o horário (o site não oferece): Pessoal vai para a agenda pessoal (ou fica privado na profissional), BNI na profissional.
+   Com "repetir toda semana", cada bloco repete sem fim, até ela tirar (o site só olha os próximos 45 dias). */
 const DURACAO_CONVERSA = 60;
-async function reservarHorarios() {
-  const v = await formulario('Reservar horário para novos clientes', [
-    { k: 'data', l: 'Dia', t: 'date', req: true, meia: true }, { k: 'hora', l: 'Horário (a conversa dura 1 hora)', t: 'time', req: true, meia: true },
-    { k: 'ate', l: 'Repetir toda semana até (vazio = toda semana, até você tirar)', t: 'date' }],
-    { data: hoje(), hora: '14:00' },
-    `<p class="mute" style="margin:0">Aparece em <b>rovyacreative.com.br/agendar</b>. Quem agenda recebe o convite com o link do Meet, e aquele dia sai sozinho do site. O que já estiver na sua agenda (profissional ou pessoal) não aparece para ninguém. Para abrir <b>só este dia</b>, coloque o mesmo dia na repetição.</p>`, 'Reservar');
-  if (!v) return false;
-  const [h, m] = v.hora.split(':').map(Number), fimMin = h * 60 + m + DURACAO_CONVERSA;
-  if (fimMin > 24 * 60) { toast('A conversa precisa acabar até meia-noite: escolha até 23:00.', true); return false; }
-  if (v.ate && v.ate < v.data) { toast('A data de repetição precisa ser depois do dia escolhido.', true); return false; }
-  const tz = 'America/Sao_Paulo', hm = x => `${String(Math.floor(x / 60) % 24).padStart(2, '0')}:${String(x % 60).padStart(2, '0')}`;
-  const dataFim = fimMin === 24 * 60 ? new Date(new Date(v.data + 'T12:00:00').getTime() + 864e5).toLocaleDateString('sv') : v.data;
-  const evento = { summary: 'Reservado · novos clientes', transparency: 'transparent',
-    description: 'Horário aberto para novos clientes agendarem pelo site (rovyacreative.com.br/agendar). Criado pelo CRM.',
-    start: { dateTime: `${v.data}T${v.hora}:00`, timeZone: tz }, end: { dateTime: `${dataFim}T${hm(fimMin)}:00`, timeZone: tz },
-    extendedProperties: { private: { crm_reserva: '1', crm_slot: String(DURACAO_CONVERSA) } } };
-  if (!v.ate) evento.recurrence = ['RRULE:FREQ=WEEKLY'];
-  else if (v.ate > v.data) evento.recurrence = [`RRULE:FREQ=WEEKLY;UNTIL=${v.ate.replace(/-/g, '')}T235959Z`];
-  try { await google('criar', { evento, agenda: 'profissional' }); }
-  catch (e) { toast(semRede(e) ? 'Sem internet: reservar horários precisa de conexão.' : e.message, true); return false; }
-  toast(`Reservado ${v.hora}–${hm(fimMin)}${!v.ate ? ', toda semana' : v.ate > v.data ? ' toda semana até ' + dataBR(v.ate) : ''}: já aparece na agenda do site.`); return true;
+const BLOCOS = { rovya: ['Rovya', 'aberto para agendarem pelo site'], pessoal: ['Pessoal', 'só bloqueia; ninguém vê o que é'], bni: ['BNI', 'reunião do BNI'] };
+const HORAS = Array.from({ length: 16 }, (_, i) => i + 6); // blocos de 1 h, das 6h às 22h
+const tipoBloco = e => reserva(e) ? 'rovya' : BLOCOS[e.extendedProperties?.private?.crm_bloco] ? e.extendedProperties.private.crm_bloco : null;
+const doisDig = h => String(h).padStart(2, '0');
+const eventoBloco = (tipo, dia, h0, h1, repetir) => {
+  const tz = 'America/Sao_Paulo';
+  const e = tipo === 'rovya'
+    ? { summary: 'Reservado · novos clientes', transparency: 'transparent', description: 'Horário aberto para novos clientes agendarem pelo site (rovyacreative.com.br/agendar). Criado pelo CRM.',
+      extendedProperties: { private: { crm_reserva: '1', crm_slot: String(DURACAO_CONVERSA) } } }
+    : { summary: BLOCOS[tipo][0], description: 'Bloqueado pelo CRM (Horários da semana).', extendedProperties: { private: { crm_bloco: tipo } },
+      ...(tipo === 'pessoal' && !TEM_PESSOAL ? { visibility: 'private' } : {}) };
+  e.start = { dateTime: `${dia}T${doisDig(h0)}:00:00`, timeZone: tz }; e.end = { dateTime: `${dia}T${doisDig(h1)}:00:00`, timeZone: tz };
+  if (repetir) e.recurrence = ['RRULE:FREQ=WEEKLY'];
+  return e;
+};
+async function horarios(sem) {
+  const n = Math.max(0, Math.min(52, parseInt(sem) || 0));
+  const seg = new Date(); seg.setHours(0, 0, 0, 0); seg.setDate(seg.getDate() - (seg.getDay() + 6) % 7 + 7 * n);
+  const dias = Array.from({ length: 7 }, (_, i) => { const d = new Date(seg); d.setDate(d.getDate() + i); return d.toLocaleDateString('sv'); });
+  const fimSem = new Date(seg); fimSem.setDate(fimSem.getDate() + 7);
+  const curto = d => new Date(d + 'T12:00').toLocaleDateString('pt-BR', { day: 'numeric', month: 'short' }).replace('.', '');
+  const inicioHora = (d, h) => new Date(`${d}T${doisDig(h)}:00`).getTime();
+  main.innerHTML = `<div class="topo"><div><div class="eyebrow"><a href="#/agenda">← Agenda</a></div><h1>Horários da semana</h1><p id="hSub">Carregando…</p></div></div><div id="hCorpo"></div>`;
+  let r; try { r = await google('listar', { de: seg.toISOString(), ate: fimSem.toISOString() }); }
+  catch (e) { if ($('#hSub')) $('#hSub').textContent = semRede(e) ? 'Sem internet: marcar horários precisa de conexão.' : e.message; return; }
+  if (!$('#hCorpo')) return;   // saiu da tela enquanto o Google respondia
+  if (r.conectado === false) { $('#hSub').innerHTML = 'Conecte o Google Agenda primeiro, em <a href="#/agenda">Agenda</a>.'; return; }
+  TEM_PESSOAL = !!r.temPessoal;
+  // o que já ocupa cada hora; compromisso de verdade aparece por cima da reserva Rovya
+  const cel = {}, agora = Date.now();
+  for (const e of r.eventos) {
+    if (!e.start.dateTime) continue;
+    const ini = new Date(e.start.dateTime).getTime(), fim = new Date(e.end.dateTime).getTime(), tipo = tipoBloco(e) || 'ocupado';
+    for (const d of dias) for (const h of HORAS) {
+      const a = inicioHora(d, h), k = d + '|' + h;
+      if (ini < a + 36e5 && fim > a && (!cel[k] || cel[k].tipo === 'rovya')) cel[k] = { tipo, e };
+    }
+  }
+  const novos = {}; let modo = 'rovya', pintar = null;
+  $('#hSub').textContent = `${curto(dias[0])} a ${curto(dias[6])}`;
+  $('#hCorpo').innerHTML = `<section class="card horarios">
+    <div class="h-barra"><div class="modos" role="radiogroup" aria-label="O que marcar">${Object.entries(BLOCOS).map(([k, [nome, dica]]) => `<button type="button" class="chip m-${k} ${k === modo ? 'ativo' : ''}" data-modo="${k}" role="radio" aria-checked="${k === modo}" title="${dica}"><i></i>${nome}</button>`).join('')}</div>
+      <label class="h-rep"><input type="checkbox" id="hRep" checked> Repetir toda semana</label>
+      <div class="h-nav">${n ? `<a class="bt peq sec" href="#/horarios/${n - 1}" aria-label="Semana anterior">‹</a>` : ''}<a class="bt peq sec" href="#/horarios/${n + 1}" aria-label="Próxima semana">›</a></div></div>
+    <p class="mute h-dica">Escolha o tipo e toque nos horários (no computador dá para arrastar). <b>Rovya</b> fica aberto para qualquer pessoa agendar uma conversa de 1 hora em <a href="${LINK_AGENDA}" target="_blank" rel="noopener">rovyacreative.com.br/agendar</a>; <b>Pessoal</b> e <b>BNI</b> só bloqueiam. Toque num horário já marcado para tirar.</p>
+    <div class="semana" id="hGrade"><div></div>${dias.map(d => `<div class="sd ${d === hoje() ? 'hj' : ''}">${new Date(d + 'T12:00').toLocaleDateString('pt-BR', { weekday: 'short' }).replace('.', '')}<b>${+d.slice(8)}</b></div>`).join('')}
+      ${HORAS.map(h => `<div class="sh">${h}h</div>` + dias.map(d => {
+        const k = d + '|' + h, c = cel[k], passou = inicioHora(d, h) + 36e5 <= agora;
+        const rot = c ? (c.tipo === 'ocupado' ? c.e.summary || 'Ocupado' : BLOCOS[c.tipo][0]) : '';
+        return `<button type="button" class="sc ${c ? 'k-' + c.tipo : ''}" data-k="${k}" ${passou ? 'disabled' : ''} title="${esc(`${curto(d)}, ${h}h–${h + 1}h${rot ? ' · ' + rot : ''}`)}">${esc(rot)}</button>`;
+      }).join('')).join('')}</div>
+    <div class="acoes h-salvar"><button class="bt" id="hSalvar" disabled>Salvar</button><span class="mute" id="hConta"></span></div></section>`;
+  const grade = $('#hGrade');
+  const marcar = (b, v) => {
+    const k = b.dataset.k; if (v) novos[k] = v; else delete novos[k];
+    b.className = 'sc' + (v ? ` k-${v} novo` : ''); b.textContent = v ? BLOCOS[v][0] : '';
+    const q = Object.keys(novos).length; $('#hConta').textContent = q ? `${q} hora(s) para salvar` : ''; $('#hSalvar').disabled = !q;
+  };
+  $('#hCorpo').querySelector('.modos').onclick = ev => {
+    const b = ev.target.closest('[data-modo]'); if (!b) return; modo = b.dataset.modo;
+    $('#hCorpo').querySelectorAll('[data-modo]').forEach(x => { x.classList.toggle('ativo', x === b); x.setAttribute('aria-checked', x === b); });
+  };
+  const tocar = (b, mouse) => {
+    const c = cel[b.dataset.k];
+    if (c) { if (c.tipo === 'ocupado') toast(`${c.e.summary || 'Compromisso'}: mude pela Agenda.`); else verBloco(c.e).then(ok => ok && horarios(n)); return; }
+    pintar = novos[b.dataset.k] === modo ? null : modo; marcar(b, pintar);
+    if (mouse) grade.dataset.arrastando = '1';
+  };
+  grade.onpointerdown = ev => { const b = ev.target.closest('.sc'); if (!b || b.disabled || ev.button) return; if (ev.pointerType === 'mouse') ev.preventDefault(); tocar(b, ev.pointerType === 'mouse'); };
+  grade.onpointerover = ev => { const b = ev.target.closest('.sc'); if (grade.dataset.arrastando && b && !b.disabled && !cel[b.dataset.k]) marcar(b, pintar); };
+  grade.onkeydown = ev => { const b = ev.target.closest('.sc'); if (b && !b.disabled && (ev.key === 'Enter' || ev.key === ' ')) { ev.preventDefault(); tocar(b, false); } };
+  const soltar = () => { if (!grade.isConnected) return removeEventListener('pointerup', soltar); delete grade.dataset.arrastando; };
+  addEventListener('pointerup', soltar);
+  $('#hSalvar').onclick = async () => {
+    // horas seguidas do mesmo tipo no mesmo dia viram um evento só
+    const blocos = [];
+    for (const d of dias) for (const h of HORAS) {
+      const t = novos[d + '|' + h]; if (!t) continue;
+      const u = blocos.at(-1); if (u && u.d === d && u.t === t && u.h1 === h) u.h1++; else blocos.push({ d, t, h0: h, h1: h + 1 });
+    }
+    const repetir = $('#hRep').checked; $('#hSalvar').disabled = true; $('#hSalvar').textContent = 'Salvando…';
+    let feitos = 0;
+    for (const b of blocos) {
+      try { await google('criar', { evento: eventoBloco(b.t, b.d, b.h0, b.h1, repetir), agenda: b.t === 'pessoal' && TEM_PESSOAL ? 'pessoal' : 'profissional' }); feitos++; }
+      catch (e) { toast((feitos ? `${feitos} salvo(s); parou: ` : '') + (semRede(e) ? 'sem internet.' : e.message), true); return horarios(n); }
+    }
+    toast(`Salvo${repetir ? ', toda semana' : ''}.${blocos.some(b => b.t === 'rovya') ? ' Os horários Rovya já aparecem na agenda do site.' : ''}`);
+    horarios(n);
+  };
 }
-async function verReserva(e) {
-  const ini = new Date(e.start.dateTime), fim = new Date(e.end.dateTime), h = d => d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
-  await formulario(`Reservado para novos clientes · ${ini.toLocaleDateString('pt-BR')}, ${h(ini)}–${h(fim)}`, [], {},
-    `<p class="mute" style="margin:0">Conversas de ${esc(e.extendedProperties.private.crm_slot || '60')} min, agendadas pelo site. Quem já marcou continua marcado se você tirar a reserva.</p>
+// horário marcado na semana (Rovya, Pessoal ou BNI): tirar só este dia ou todas as semanas
+async function verBloco(e) {
+  const tipo = tipoBloco(e), ini = new Date(e.start.dateTime), fim = new Date(e.end.dateTime), h = d => d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+  await formulario(`${tipo === 'rovya' ? 'Aberto para novos clientes' : BLOCOS[tipo][0]} · ${ini.toLocaleDateString('pt-BR')}, ${h(ini)}–${h(fim)}`, [], {},
+    `<p class="mute" style="margin:0">${tipo === 'rovya' ? `Conversas de ${esc(e.extendedProperties.private.crm_slot || '60')} min, agendadas pelo site. Quem já marcou continua marcado se você tirar.` : 'Horário bloqueado: o site não oferece para ninguém.'}</p>
      <button class="bt fantasma" value="um" style="justify-self:start;color:var(--bad)">Tirar só este dia</button>
      ${e.recurringEventId ? '<button class="bt fantasma" value="todos" style="justify-self:start;color:var(--bad)">Tirar todas as semanas</button>' : ''}`, 'Fechar');
   const rv = $('#dlg').returnValue;
   if (rv !== 'um' && rv !== 'todos') return false;
   try { await google('apagar', { id: rv === 'todos' ? e.recurringEventId : e.id, agenda: e._agenda }); }
   catch (err) { toast(semRede(err) ? 'Sem internet: precisa de conexão.' : err.message, true); return false; }
-  toast('Reserva tirada'); return true;
+  toast('Tirado'); return true;
 }
 
 // quais agendas do Google entram no CRM: profissional (recebe tudo do CRM e do site), pessoal e outras só para ver
@@ -654,7 +724,7 @@ async function agenda() {
   } else {
     if (!r.falhou) TEM_PESSOAL = !!r.temPessoal;
     $('#agSub').textContent = r.falhou || (navigator.onLine ? `Conectada a ${r.email} · próximas 3 semanas` : 'Sem internet · agenda como estava na última vez que abriu com conexão');
-    $('#agAcoes').innerHTML = (r.falhou ? '' : '<button class="bt sec" id="cfgAg">Agendas</button><button class="bt sec" id="desc">Desconectar</button><button class="bt sec" id="reservar">Reservar horários</button>') + '<button class="bt" id="nEv">+ Compromisso</button>';
+    $('#agAcoes').innerHTML = (r.falhou ? '' : '<button class="bt sec" id="cfgAg">Agendas</button><button class="bt sec" id="desc">Desconectar</button><a class="bt sec" id="reservar" href="#/horarios">Horários da semana</a>') + '<button class="bt" id="nEv">+ Compromisso</button>';
     if (r.faltam?.length) {
       $('#agAviso').innerHTML = `<section class="card avisos"><p style="margin:0 0 10px">Para usar o <b>link do Meet</b>, os <b>convites por e-mail</b>, a <b>agenda pessoal</b> e as <b>outras agendas</b>, os <b>contatos</b> e o <b>Gmail</b>, reconecte o Google e marque “Permitir”.</p><button class="bt" id="recon">Reconectar Google</button></section>`;
       $('#recon').onclick = reconectar;
@@ -684,13 +754,12 @@ async function agenda() {
   main.querySelectorAll('[data-ev]').forEach(el => el.onclick = async ev => {
     if (ev.target.closest('[data-meet]')) return;
     const e = porId[el.dataset.ev]; if (!e.start.dateTime) { window.open(e.htmlLink, '_blank'); return; }
-    if (reserva(e)) { if (await verReserva(e)) agenda(); return; }
+    if (tipoBloco(e)) { if (await verBloco(e)) agenda(); return; }
     const ini = new Date(e.start.dateTime), fim = new Date(e.end.dateTime);
     const ok = await novoEvento({ titulo: e.summary, cliente_id: clienteDoEvento(e, cs)?.id || '', data: ini.toLocaleDateString('sv'), hora: ini.toTimeString().slice(0, 5), duracao: Math.round((fim - ini) / 6e4), local: e.location, notas: e.description }, e);
     if (ok) agenda();
   });
   if ($('#nEv')) $('#nEv').onclick = async () => { if (await novoEvento()) agenda(); };
-  if ($('#reservar')) $('#reservar').onclick = async () => { if (await reservarHorarios()) agenda(); };
   if ($('#cfgAg')) $('#cfgAg').onclick = async () => { if (await configurarAgendas()) agenda(); };
   if ($('#desc')) $('#desc').onclick = async () => { if (await confirma('Desconectar o Google Agenda?')) { await google('desconectar'); agenda(); } };
 }
@@ -892,7 +961,7 @@ const CAPACIDADES = [
     ['Escreve um e-mail de retorno para ', 'Uma mensagem de WhatsApp lembrando com carinho da parcela de ', 'Faz um rascunho de proposta para ', 'Me dá 5 ideias de pauta para ']],
   ['Saber onde você está', 'Aberta pela Sabrina do canto numa ficha de cliente, projeto, proposta ou contrato, ela já sabe do que você está falando.',
     ['O que falta aqui?', 'Quando falei com ela pela última vez?']],
-  ['Avisar no celular', `Resumo do dia às 7h30; “precisa da sua atenção” quando um cliente com negociação aberta está há 10 dias sem contato, uma proposta vence em até 3 dias, um contrato entra no prazo de aviso ou uma parcela atrasa; e às sextas, como foi a semana.`, []],
+  ['Avisar no celular', `Lembrete de tarefa no dia e hora que você escolher; resumo do dia às 7h30; “precisa da sua atenção” quando um cliente com negociação aberta está há 10 dias sem contato, uma proposta vence em até 3 dias, um contrato entra no prazo de aviso ou uma parcela atrasa; e às sextas, como foi a semana.`, []],
 ];
 async function assistente() {
   fecharSabrina();
@@ -963,32 +1032,6 @@ function sabrinaNoCanto() {
   setTimeout(() => animarSabrina(canto), 1500);
 }
 
-// notificações no celular (Web Push). No iPhone só funciona com o app instalado na tela de início.
-async function avisoNotificacoes() {
-  const el = $('#avisos'); if (!el) return;
-  const suporta = 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
-  const ios = /iphone|ipad/i.test(navigator.userAgent), instalado = matchMedia('(display-mode: standalone)').matches || navigator.standalone;
-  if (!suporta) { el.innerHTML = ios && !instalado ? '<small class="mute">Para receber notificações no iPhone: Compartilhar → Adicionar à Tela de Início, e abra pelo ícone.</small>' : ''; return; }
-  const reg = await navigator.serviceWorker.ready;
-  const inscrito = await reg.pushManager.getSubscription();
-  if (inscrito && Notification.permission === 'granted') {
-    el.innerHTML = '<button class="bt peq sec" id="bTestar">Testar notificação</button>';
-    $('#bTestar').onclick = async () => { const r = await funcao('crm-assistente', 'testar'); toast(r.enviadas ? 'Notificação enviada' : 'Nenhum aparelho recebeu'); };
-    return;
-  }
-  if (Notification.permission === 'denied') { el.innerHTML = '<small class="mute">Notificações bloqueadas nas configurações do navegador.</small>'; return; }
-  el.innerHTML = '<button class="bt sec" id="bNotif">🔔 Receber resumo às 7h30</button>';
-  $('#bNotif').onclick = async () => {
-    try {
-      if (await Notification.requestPermission() !== 'granted') { toast('Permissão negada', true); return; }
-      const { publica } = await funcao('crm-assistente', 'chave');
-      const bytes = Uint8Array.from(atob(publica.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat((4 - publica.length % 4) % 4)), c => c.charCodeAt(0));
-      const s = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: bytes });
-      await q(sb.from('crm_push').upsert({ endpoint: s.endpoint, inscricao: s.toJSON() }));
-      toast('Pronto! Você vai receber o resumo toda manhã'); avisoNotificacoes();
-    } catch (e) { toast('Não consegui ativar: ' + e.message, true); }
-  };
-}
 /* ---------- cópia completa no aparelho ----------
    A cada 30 min (com o CRM aberto e internet), abre cada tela e cada ficha num quadro invisível;
    o sw.js guarda as respostas, então sem internet tudo abre com a versão mais nova, mesmo o que ela não abriu.

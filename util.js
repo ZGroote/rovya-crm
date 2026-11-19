@@ -152,9 +152,17 @@ export const listaClientes = () => q(sb.from('crm_clientes').select('id,codigo,n
 export const opcoesClientes = cs => cs.map(c => [c.id, (c.codigo ? c.codigo + ' · ' : '') + c.nome + (c.empresa ? ` · ${c.empresa}` : '')]);
 
 // chama uma Edge Function do Supabase com o login atual
+// O login vale 1 h. Aba em segundo plano (e o quadro da cópia completa) pode chegar com ele vencido há segundos:
+// o banco ainda aceita (tolera 30 s), a função não. Renova antes se faltar menos de 1 min, e tenta de novo uma vez se vier 401.
+const tokenAtual = async forcar => {
+  let { data: { session } } = await sb.auth.getSession();
+  if (session && (forcar || session.expires_at * 1000 - Date.now() < 60e3)) session = (await sb.auth.refreshSession()).data?.session || session;
+  return session?.access_token;
+};
 export async function funcao(nome, acao, dados = {}) {
-  const { data: { session } } = await sb.auth.getSession();
-  const r = await fetch(`${SUPABASE_URL}/functions/v1/${nome}`, { method: 'POST', headers: { Authorization: 'Bearer ' + session?.access_token, 'Content-Type': 'application/json' }, body: JSON.stringify({ acao, ...dados }) });
+  const chamar = async forcar => fetch(`${SUPABASE_URL}/functions/v1/${nome}`, { method: 'POST', headers: { Authorization: 'Bearer ' + await tokenAtual(forcar), 'Content-Type': 'application/json' }, body: JSON.stringify({ acao, ...dados }) });
+  let r = await chamar(false);
+  if (r.status === 401) r = await chamar(true);
   const j = await r.json().catch(() => ({})); if (!r.ok) { const m = j.erro || 'Falha (' + r.status + ')'; registrarFalha(nome, acao, m); throw new Error(m); } return j;
 }
 // guarda a falha de integração para a Sabrina ver em Configurações (nunca quebra a tela se o registro falhar)
@@ -166,4 +174,32 @@ export function baixarCsv(linhas, nome) {
   const url = URL.createObjectURL(new Blob(['﻿' + linhas.map(l => l.map(cel).join(';')).join('\r\n')], { type: 'text/csv;charset=utf-8' }));
   Object.assign(document.createElement('a'), { href: url, download: nome }).click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+// notificações no celular e no computador (Web Push): cada aparelho ativa o seu. No iPhone só funciona com o app instalado na tela de início.
+// Aparece onde houver um #avisos (Tarefas e Assistente).
+export async function avisoNotificacoes() {
+  const el = $('#avisos'); if (!el) return;
+  const suporta = 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+  const ios = /iphone|ipad/i.test(navigator.userAgent), instalado = matchMedia('(display-mode: standalone)').matches || navigator.standalone;
+  if (!suporta) { el.innerHTML = ios && !instalado ? '<small class="mute">Para receber notificações no iPhone: Compartilhar → Adicionar à Tela de Início, e abra pelo ícone.</small>' : ''; return; }
+  const reg = await navigator.serviceWorker.ready;
+  const inscrito = await reg.pushManager.getSubscription();
+  if (inscrito && Notification.permission === 'granted') {
+    el.innerHTML = '<button class="bt peq sec" id="bTestar">Testar notificação</button>';
+    $('#bTestar').onclick = async () => { const r = await funcao('crm-assistente', 'testar'); toast(r.enviadas ? 'Notificação enviada' : 'Nenhum aparelho recebeu'); };
+    return;
+  }
+  if (Notification.permission === 'denied') { el.innerHTML = '<small class="mute">Notificações bloqueadas nas configurações do navegador.</small>'; return; }
+  el.innerHTML = '<button class="bt sec" id="bNotif">🔔 Ativar notificações neste aparelho</button>';
+  $('#bNotif').onclick = async () => {
+    try {
+      if (await Notification.requestPermission() !== 'granted') { toast('Permissão negada', true); return; }
+      const { publica } = await funcao('crm-assistente', 'chave');
+      const bytes = Uint8Array.from(atob(publica.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat((4 - publica.length % 4) % 4)), c => c.charCodeAt(0));
+      const s = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: bytes });
+      await q(sb.from('crm_push').upsert({ endpoint: s.endpoint, inscricao: s.toJSON() }));
+      toast('Pronto! Lembretes, alertas e o resumo das 7h30 chegam neste aparelho'); avisoNotificacoes();
+    } catch (e) { toast('Não consegui ativar: ' + e.message, true); }
+  };
 }

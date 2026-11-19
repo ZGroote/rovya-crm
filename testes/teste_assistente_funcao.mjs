@@ -28,15 +28,17 @@ class Q {
   in(k, l) { this.f.push(r => l.includes(r[k])); return this; }
   gte(k, v) { this.f.push(r => (r[k] ?? '') >= v); return this; }
   not(k, op, v) { if (op === 'is' && v === null) this.f.push(r => r[k] != null); return this; }
-  or() { return this; } order() { return this; } neq() { return this; } is() { return this; } limit() { return this; }
+  or() { return this; } order() { return this; } limit() { return this; }
+  neq(k, v) { this.f.push(r => r[k] !== v); return this; } is(k, v) { this.f.push(r => (r[k] ?? null) === v); return this; }
   maybeSingle() { this.um = true; return this; }
   lt(k, v) { this.f.push(r => (r[k] ?? '') < v); return this; }
+  lte(k, v) { this.f.push(r => r[k] != null && r[k] <= v); return this; }
   insert(v) { this.ins = v; return this; } update(v) { this.upd = v; return this; } delete() { return this; }
   then(res) {
     const tb = T[this.t] ||= [];
     if (this.ins) { tb.push(...[].concat(this.ins).map(r => ({ id: 'n' + tb.length, quando: new Date().toISOString(), resolvida: false, ...r }))); return res({ error: null }); }
     const rs = tb.filter(r => this.f.every(f => f(r)));
-    if (this.upd) { rs.forEach(r => Object.assign(r, this.upd)); return res({ error: null }); }
+    if (this.upd) { rs.forEach(r => Object.assign(r, this.upd)); return res({ error: null, data: rs.map(r => ({ id: r.id })) }); }
     return res(this.o?.head ? { count: rs.length } : { data: this.um ? rs[0] ?? null : rs }); }
 }
 globalThis.__db = { from: t => new Q(t), auth: { getUser: async () => ({ data: { user: { email: 'sa@x.com', factors: [] } } }) } };
@@ -129,5 +131,21 @@ ok(novas.length === 2 && novas.some(f => f.origem === 'crm-google' && /Reconecta
   `quebrou: um aviso por problema, sem repetir a cada 6 h → ${novas.map(f => f.mensagem.slice(0, 40)).join(' | ')}`);
 googleOk = true; geminiStatus = 200; await verif();
 ok(!T.crm_falhas.some(f => f.acao === 'verificação automática' && !f.resolvida), 'voltou a funcionar: o aviso some sozinho');
+
+// 4) lembretes das tarefas: só os vencidos, não enviados e não feitos; cada um uma vez só; sem IA
+const passou = new Date(Date.now() - 6e4).toISOString(), depois = new Date(Date.now() + 36e5).toISOString();
+T.crm_tarefas = [{ id: 'l1', titulo: 'Ligar para a Marina', status: 'a_fazer', lembrete: passou, lembrete_enviado: null, prazo: dia(1), descricao: 'x'.repeat(400), crm_clientes: { nome: 'Marina', empresa: null } },
+  { id: 'l2', titulo: 'Futuro', status: 'a_fazer', lembrete: depois, lembrete_enviado: null },
+  { id: 'l3', titulo: 'Já feita', status: 'feita', lembrete: passou, lembrete_enviado: null },
+  { id: 'l4', titulo: 'Já avisada', status: 'a_fazer', lembrete: passou, lembrete_enviado: passou }];
+pushes.length = 0; pedido = null;
+const lem = await chamar({ lembretes: true }, { 'x-cron': 'k' });
+ok(lem.lembretes === 1 && pushes.length === 1 && pushes[0].title === '⏰ Ligar para a Marina', `manda só o lembrete vencido → ${pushes.map(p => p.title)}`);
+ok(/^Marina • prazo \d\d\/\d\d • x+/.test(pushes[0]?.body) && pushes[0].body.length <= 200 && pushes[0].url.endsWith('#/tarefas'), `texto: cliente, prazo e descrição, cabendo; abre Tarefas → ${pushes[0]?.body.slice(0, 40)}`);
+ok(T.crm_tarefas[0].lembrete_enviado && !T.crm_tarefas[1].lembrete_enviado && !T.crm_tarefas[2].lembrete_enviado, 'marca como enviado só o que mandou');
+ok(pedido === null, 'lembrete não chama a IA');
+pushes.length = 0; await chamar({ lembretes: true }, { 'x-cron': 'k' });
+ok(pushes.length === 0, 'chamado de novo: não repete');
+ok((await chamar({ lembretes: true }, { 'x-cron': 'errada' })).status === 401, 'lembretes com chave errada: recusado');
 
 console.log('ERROS:', erros.length ? erros : 'nenhum'); process.exit(erros.length ? 1 : 0);

@@ -51,34 +51,57 @@ with sync_playwright() as p:
     ok(pg.locator('.ev', has_text='Pilates').is_visible() and pg.locator('.ev', has_text='Reunião Horizonte').is_hidden(), 'filtro “Pessoal” mostra só o pessoal')
     pg.click('#agFiltro [data-filtro=""]')
 
-    # 3) reservar horário para novos clientes: 1 hora fixa; sem data = toda semana; mesmo dia = só ele; data = até lá
-    pg.click('#reservar'); pg.wait_for_selector('#dlg[open]')
-    ok(pg.locator('#dlgf [name=dur], #dlgf [name=fim]').count() == 0, 'não pede duração nem horário final')
-    pg.fill('#dlgf [name=data]', amanha); pg.fill('#dlgf [name=hora]', '14:00')
-    pg.click('#dlgf button[value=ok]'); pg.wait_for_timeout(600)
-    r = ev('criar')[-1]['evento']
-    ok(r['extendedProperties']['private'] == {'crm_reserva': '1', 'crm_slot': '60'} and r['transparency'] == 'transparent', 'reserva marcada como livre, conversa de 1 hora')
-    ok(r['start'] == {'dateTime': amanha + 'T14:00:00', 'timeZone': 'America/Sao_Paulo'} and r['end'] == {'dateTime': amanha + 'T15:00:00', 'timeZone': 'America/Sao_Paulo'}, '14h vai até as 15h sozinho')
-    ok(r['recurrence'] == ['RRULE:FREQ=WEEKLY'], 'sem data de repetição: toda semana, sem fim')
-    ok('toda semana' in pg.inner_text('#toast'), 'aviso diz que repete toda semana')
-    pg.wait_for_selector('.ev.reserva')
+    # 3) horários da semana: pinta Rovya / Pessoal / BNI; horas seguidas viram um evento só; repete toda semana; tirar
+    pg.click('#reservar'); pg.wait_for_selector('#hGrade')
+    ok(pg.locator('#nav a.on').inner_text().strip().endswith('Agenda'), 'Horários da semana fica dentro de Agenda')
+    agora_h = pg.evaluate('new Date().getHours()'); hj = pg.evaluate("new Date().toLocaleDateString('sv')")
+    if agora_h >= 7: ok(pg.locator(f'#hGrade .sc[data-k="{hj}|6"]').is_disabled(), 'hora que já passou não dá para marcar')
+    seg = pg.evaluate("(() => { const d = new Date(); d.setHours(0,0,0,0); d.setDate(d.getDate() - (d.getDay() + 6) % 7 + 7); return d.toLocaleDateString('sv'); })()")
+    ter = pg.evaluate(f"(() => {{ const d = new Date('{seg}T12:00'); d.setDate(d.getDate() + 1); return d.toLocaleDateString('sv'); }})()")
+    pg.evaluate(f"window.__EV.eventos.push({{ id: 'g5', summary: 'Reunião Horizonte', start: {{ dateTime: '{ter}T10:00:00-03:00' }}, end: {{ dateTime: '{ter}T11:30:00-03:00' }} }})")
+    pg.click('.h-nav a[aria-label="Próxima semana"]'); pg.wait_for_selector(f'#hGrade .sc[data-k="{seg}|9"]')
+    cel = lambda d, h: f'#hGrade .sc[data-k="{d}|{h}"]'
+    ok('k-ocupado' in pg.get_attribute(cel(ter, 10), 'class') and 'k-ocupado' in pg.get_attribute(cel(ter, 11), 'class') and pg.inner_text(cel(ter, 10)) == 'Reunião Horizonte', 'compromisso da agenda aparece ocupado (10h e 11h)')
+    n0 = len(ev('criar'))
+    pg.hover(cel(seg, 9)); pg.mouse.down(); pg.hover(cel(seg, 10)); pg.mouse.up()   # arrastar: 9h e 10h
+    pg.click(cel(seg, 14))
+    pg.click('[data-modo=bni]'); pg.click(cel(ter, 7))
+    pg.click('[data-modo=pessoal]'); pg.click(cel(ter, 18)); pg.click(cel(ter, 18)); pg.click(cel(ter, 19))   # tocar de novo desmarca
+    pg.click(cel(ter, 10)); pg.wait_for_timeout(200)
+    ok('mude pela Agenda' in pg.inner_text('#toast') and pg.locator('#dlg[open]').count() == 0, 'tocar num compromisso não marca por cima')
+    ok(pg.inner_text('#hConta') == '5 hora(s) para salvar', f'conta as horas marcadas: {pg.inner_text("#hConta")}')
+    pg.screenshot(path=os.path.join(S, 'ag_horarios.png'), full_page=True)
+    pg.click('#hSalvar'); pg.wait_for_selector(cel(seg, 9) + '.k-rovya:not(.novo)')
+    cs = ev('criar')[n0:]; tz = 'America/Sao_Paulo'
+    ok(len(cs) == 4, f'horas seguidas viram um evento só: {len(cs)} eventos')
+    r = cs[0]['evento']
+    ok(r['start'] == {'dateTime': seg + 'T09:00:00', 'timeZone': tz} and r['end'] == {'dateTime': seg + 'T11:00:00', 'timeZone': tz}, 'Rovya 9h e 10h → um período 9h–11h')
+    ok(r['extendedProperties']['private'] == {'crm_reserva': '1', 'crm_slot': '60'} and r['transparency'] == 'transparent' and cs[0]['agenda'] == 'profissional', 'Rovya: livre, conversas de 1 hora, na agenda profissional (o site oferece)')
+    ok(all(c['evento'].get('recurrence') == ['RRULE:FREQ=WEEKLY'] for c in cs), 'repetir toda semana: sem fim')
+    bni = cs[2]
+    ok(bni['evento']['summary'] == 'BNI' and bni['evento']['extendedProperties']['private'] == {'crm_bloco': 'bni'} and 'transparency' not in bni['evento'] and bni['agenda'] == 'profissional', 'BNI: ocupa o horário (o site não oferece), na profissional')
+    pes = cs[3]
+    ok(pes['evento']['summary'] == 'Pessoal' and pes['agenda'] == 'pessoal' and pes['evento']['start']['dateTime'] == ter + 'T19:00:00', 'Pessoal: na agenda pessoal, só o horário que ficou marcado')
+    ok('k-bni' in pg.get_attribute(cel(ter, 7), 'class') and 'k-pessoal' in pg.get_attribute(cel(ter, 19), 'class') and 'k-pessoal' not in pg.get_attribute(cel(ter, 18), 'class'), 'depois de salvar, a semana mostra o que ficou')
+    # só esta semana
+    pg.uncheck('#hRep'); pg.click(cel(seg, 16)); pg.click('#hSalvar'); pg.wait_for_selector(cel(seg, 16) + '.k-rovya:not(.novo)')
+    ok('recurrence' not in ev('criar')[-1]['evento'], 'sem “repetir”: só aquele dia')
+    # tirar
+    n = len(ev('apagar')); pg.click(cel(ter, 7)); pg.wait_for_selector('#dlg[open]')
+    ok('BNI' in pg.inner_text('#dlgf h2') and pg.locator('#dlgf button[value=um]').count() == 1, 'tocar num horário marcado oferece tirar')
+    pg.click('#dlgf button[value=um]'); pg.wait_for_timeout(500)
+    ok(len(ev('apagar')) == n + 1 and ev('apagar')[-1]['agenda'] == 'profissional', 'tirar apaga do Google')
+    pg.set_viewport_size({'width': 390, 'height': 844}); pg.wait_for_timeout(200)
+    ok(pg.evaluate('document.documentElement.scrollWidth <= innerWidth'), 'no celular, a semana cabe sem rolar para o lado')
+    pg.screenshot(path=os.path.join(S, 'ag_horarios_cel.png'), full_page=True)
+    pg.set_viewport_size({'width': 1300, 'height': 900})
+    # na lista da Agenda, a reserva aparece diferente e abre o "tirar"
+    pg.evaluate(f"window.__EV.eventos.push({{ id: 'r1', summary: 'Reservado · novos clientes', transparency: 'transparent', start: {{ dateTime: '{amanha}T14:00:00-03:00' }}, end: {{ dateTime: '{amanha}T15:00:00-03:00' }}, extendedProperties: {{ private: {{ crm_reserva: '1', crm_slot: '60' }} }} }})")
+    pg.goto(base + '#/agenda'); pg.wait_for_selector('.ev.reserva')
     ok('aberto para agendamentos pelo site' in pg.inner_text('.ev.reserva'), 'reserva aparece diferente na agenda')
-    pg.screenshot(path=os.path.join(S, 'ag_agenda.png'), full_page=True)
     pg.click('.ev.reserva'); pg.wait_for_selector('#dlg[open]')
     ok(pg.locator('#dlgf button[value=um]').count() == 1, 'clicar na reserva oferece tirar')
-    pg.click('#dlgf button[value=um]'); pg.wait_for_timeout(500)
-    ok(len(ev('apagar')) == 1, 'tirar a reserva apaga do Google')
-    pg.click('#reservar'); pg.wait_for_selector('#dlg[open]')
-    pg.fill('#dlgf [name=data]', amanha); pg.fill('#dlgf [name=hora]', '09:30'); pg.fill('#dlgf [name=ate]', amanha); pg.click('#dlgf button[value=ok]'); pg.wait_for_timeout(500)
-    r = ev('criar')[-1]['evento']
-    ok('recurrence' not in r and r['end']['dateTime'] == amanha + 'T10:30:00', 'mesmo dia na repetição: só esse dia (9h30 → 10h30)')
-    pg.click('#reservar'); pg.wait_for_selector('#dlg[open]')
-    pg.fill('#dlgf [name=data]', amanha); pg.fill('#dlgf [name=hora]', '19:00'); pg.fill('#dlgf [name=ate]', mais3sem); pg.click('#dlgf button[value=ok]'); pg.wait_for_timeout(500)
-    ok(ev('criar')[-1]['evento']['recurrence'] == ['RRULE:FREQ=WEEKLY;UNTIL=' + mais3sem.replace('-', '') + 'T235959Z'], 'com data: toda semana até ela')
-    pg.click('#reservar'); pg.wait_for_selector('#dlg[open]')
-    pg.fill('#dlgf [name=hora]', '23:30'); n = len(ev('criar'))
-    pg.click('#dlgf button[value=ok]'); pg.wait_for_timeout(400)
-    ok(len(ev('criar')) == n and 'meia-noite' in pg.inner_text('#toast'), 'depois das 23h não cria (passaria da meia-noite)')
+    pg.click('#dlgf button[value=cancelar]')
 
     # 4) compromissos antigos ligados ao cliente: pelo nome no título e pelo e-mail do convidado
     pg.evaluate(f"""window.__EV.eventos.push(

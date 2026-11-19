@@ -235,3 +235,28 @@ body.sem-rede #main::before{content:"Sem internet · mostrando os dados salvos n
 .links-bio .ordem .bt{padding:2px 8px;line-height:1}
 .links-bio li.oculto .cresce{opacity:.55}
 .links-bio small a{word-break:break-all}
+
+/* horários da semana (#/horarios): pinta Rovya / Pessoal / BNI hora a hora */
+.horarios .h-barra{display:flex;flex-wrap:wrap;align-items:center;gap:10px 16px}
+.horarios .modos{display:flex;flex-wrap:wrap;gap:6px}
+.horarios .modos i{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:6px;vertical-align:-1px;border:1px solid}
+.m-rovya i{background:#b08a4a55;border-color:var(--gold)}.m-pessoal i{background:#3f7a5240;border-color:var(--ok)}.m-bni i{background:#8e0f1d33;border-color:var(--wine)}
+.horarios .h-rep{display:flex;align-items:center;gap:6px;font-size:.85rem;color:var(--mute);cursor:pointer}
+.horarios .h-nav{display:flex;gap:6px;margin-left:auto}
+.horarios .h-dica{font-size:.85rem;margin:12px 0}
+.semana{display:grid;grid-template-columns:34px repeat(7,minmax(0,1fr));gap:3px;user-select:none;-webkit-user-select:none}
+.semana .sd{text-align:center;font-size:.72rem;color:var(--mute);text-transform:capitalize;padding-bottom:4px}
+.semana .sd b{display:block;font-size:1rem;color:var(--ink)}
+.semana .sd.hj b{color:var(--wine)}
+.semana .sh{font-size:.7rem;color:var(--mute);text-align:right;padding:8px 4px 0 0}
+.sc{height:34px;min-width:0;border:1px solid var(--line);border-radius:6px;background:var(--card);font:500 .68rem/1.1 Inter,system-ui,sans-serif;color:var(--ink);padding:2px 5px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;cursor:pointer;text-align:left;touch-action:manipulation}
+.sc:hover:not(:disabled){border-color:var(--gold)}
+.sc:focus-visible{outline:2px solid var(--wine);outline-offset:1px}
+.sc:disabled{opacity:.35;cursor:default}
+.sc.k-rovya{background:#b08a4a2e;border-color:var(--gold)}
+.sc.k-pessoal{background:#3f7a5224;border-color:var(--ok)}
+.sc.k-bni{background:#8e0f1d1c;border-color:var(--wine)}
+.sc.k-ocupado{background:repeating-linear-gradient(135deg,#7d706718 0 6px,transparent 6px 12px);color:var(--mute)}
+.sc.novo{border-style:dashed;border-width:2px}
+.horarios .h-salvar{justify-content:flex-start;align-items:center;margin-top:14px;position:sticky;bottom:0;background:var(--card);padding:10px 0 2px}
+@media (max-width:760px){.horarios .h-salvar{bottom:calc(62px + env(safe-area-inset-bottom))}.semana{grid-template-columns:26px repeat(7,minmax(0,1fr));gap:2px}.sc{font-size:0;padding:0}.semana .sh{font-size:.62rem;padding-right:2px}.horarios .h-nav{margin-left:0}}

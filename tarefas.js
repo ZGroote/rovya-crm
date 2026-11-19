@@ -1,5 +1,5 @@
 // TAREFAS: avulsas ou ligadas a projeto/cliente. Nada muda sozinho: só a Sabrina conclui, edita ou apaga.
-import { sb, $, main, esc, hoje, diaLocal, dataBR, venceu, toast, q, rotulo, formulario, confirma, listaClientes, opcoesClientes, salvar, comPendentes, campos } from './util.js';
+import { sb, $, main, esc, hoje, diaLocal, dataBR, venceu, toast, q, rotulo, formulario, confirma, listaClientes, opcoesClientes, salvar, comPendentes, campos, avisoNotificacoes } from './util.js';
 
 const PRIORIDADES = [['baixa', 'Baixa'], ['media', 'Média'], ['alta', 'Alta']];
 const STATUS = [['a_fazer', 'A fazer'], ['fazendo', 'Fazendo'], ['feita', 'Feita']];
@@ -7,6 +7,9 @@ const COR_PRI = { baixa: '', media: 'p-a_fazer', alta: 'p-revisao' };
 const PESO_PRI = { alta: 0, media: 1, baixa: 2 };
 const SEL = '*,crm_projetos(id,nome),crm_clientes(id,nome,empresa)';
 const linkSeguro = u => /^https?:\/\//i.test(u || '');
+// lembrete: o banco guarda o instante (timestamptz); o campo datetime-local mostra e devolve a hora do aparelho
+const paraCampo = iso => { if (!iso) return ''; const d = new Date(iso); return new Date(d - d.getTimezoneOffset() * 6e4).toISOString().slice(0, 16); };
+const horaLembrete = iso => new Date(iso).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
 
 /* ---------- linha reutilizável (lista, aba do projeto, Início) ---------- */
 export function linhaTarefa(t) {
@@ -21,6 +24,7 @@ export function linhaTarefa(t) {
     <div class="cresce"><b${feita ? ' style="text-decoration:line-through"' : ''}>${esc(t.titulo)}</b>${meta ? `<small>${meta}</small>` : ''}</div>
     ${linkSeguro(t.link) ? `<a href="${esc(t.link)}" target="_blank" rel="noopener" title="Abrir anexo">🔗</a>` : ''}
     ${t._pendente ? '<span class="pill pend" title="Guardado neste aparelho; vai para o banco quando a internet voltar">⏳</span>' : ''}
+    ${t.lembrete && !t.lembrete_enviado && !feita ? `<span class="mute" title="Lembrete: chega como notificação nos aparelhos que ativaram">🔔 ${horaLembrete(t.lembrete)}</span>` : ''}
     ${t.status === 'fazendo' ? '<span class="pill p-produzindo">Fazendo</span>' : ''}
     <span class="pill ${COR_PRI[t.prioridade] || ''}">${esc(rotulo(PRIORIDADES, t.prioridade))}</span>
     ${t.prazo ? `<span class="${venceu(t.prazo) && !feita ? 'atrasado' : 'mute'}">${dataBR(t.prazo)}</span>` : ''}
@@ -49,10 +53,12 @@ async function formTarefa(titulo, val, extra = '') {
     { k: 'titulo', l: 'Tarefa', req: true },
     { k: 'descricao', l: 'Descrição', t: 'textarea', linhas: 4 },
     { k: 'prioridade', l: 'Prioridade', t: 'select', o: PRIORIDADES, meia: true }, { k: 'status', l: 'Status', t: 'select', o: STATUS, meia: true },
-    { k: 'prazo', l: 'Prazo', t: 'date', meia: true }, { k: 'link', l: 'Anexo (link do Drive, Canva…)', meia: true },
+    { k: 'prazo', l: 'Prazo', t: 'date', meia: true }, { k: 'lembrete', l: 'Lembrete (dia e hora)', t: 'datetime-local', meia: true },
+    { k: 'link', l: 'Anexo (link do Drive, Canva…)' },
     { k: 'projeto_id', l: 'Projeto (opcional)', t: 'select', o: [['', '— nenhum —'], ...ps.map(p => [p.id, p.nome])] },
     { k: 'cliente_id', l: 'Cliente (opcional; se escolher projeto, vale o cliente dele)', t: 'select', o: [['', '— nenhum —'], ...opcoesClientes(cs)] },
-  ], val, extra);
+  ], { ...val, lembrete: paraCampo(val.lembrete) }, extra);
+  if (v) v.lembrete = v.lembrete ? new Date(v.lembrete).toISOString() : null;
   if (v?.projeto_id) v.cliente_id = ps.find(p => p.id === v.projeto_id)?.cliente_id ?? v.cliente_id;
   return v;
 }
@@ -95,12 +101,13 @@ export async function tarefas(filtro = 'abertas') {
       + grupoHtml('Próximas', ts.filter(t => t.prazo > h), 'Nenhuma tarefa com prazo à frente.')
       + grupoHtml('Sem prazo', ts.filter(t => !t.prazo), 'Nenhuma tarefa sem prazo.');
   }
-  main.innerHTML = `<div class="topo"><div><div class="eyebrow">Produção</div><h1>Tarefas</h1></div><button class="bt" id="nTarefa">+ Tarefa</button></div>
+  main.innerHTML = `<div class="topo"><div><div class="eyebrow">Produção</div><h1>Tarefas</h1></div><div class="acoes"><span class="acoes" id="avisos"></span><button class="bt" id="nTarefa">+ Tarefa</button></div></div>
     <div class="tabs">${[['abertas', 'Abertas'], ['feitas', 'Feitas']].map(([k, l]) => `<button data-f="${k}" class="${k === filtro ? 'on' : ''}">${l}</button>`).join('')}</div>
     ${corpo}`;
   main.querySelectorAll('[data-f]').forEach(b => b.onclick = () => tarefas(b.dataset.f));
   $('#nTarefa').onclick = async () => { if (await novaTarefa()) tarefas(filtro); };
   ligarLinhas(main, ts, () => tarefas(filtro));
+  avisoNotificacoes();
 }
 
 /* ---------- aba "Tarefas" do projeto ---------- */

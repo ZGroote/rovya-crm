@@ -246,6 +246,23 @@ async function notificar(titulo: string, corpo: string, url = '#/assistente') {
   return { enviadas: ok, removidas, total: subs?.length ?? 0 };
 }
 
+/* ---------- lembretes das tarefas (pg_cron crm-lembretes, 019_lembretes.sql: só chama quando há um vencido) ----------
+   Marca cada tarefa como enviada antes de notificar, com a condição "ainda não enviada": se duas chamadas se cruzarem, só uma envia. */
+async function lembretes() {
+  const agora = new Date().toISOString();
+  const { data } = await db.from('crm_tarefas').select('id,titulo,descricao,prazo,crm_clientes(nome,empresa)')
+    .lte('lembrete', agora).is('lembrete_enviado', null).neq('status', 'feita').limit(20);
+  let enviados = 0;
+  for (const t of data ?? []) {
+    const { data: meu } = await db.from('crm_tarefas').update({ lembrete_enviado: agora }).eq('id', t.id).is('lembrete_enviado', null).select('id');
+    if (!meu?.length) continue;
+    const c = t.crm_clientes, prazo = t.prazo ? 'prazo ' + t.prazo.split('-').reverse().slice(0, 2).join('/') : '';
+    await notificar('⏰ ' + String(t.titulo).slice(0, 70), caber([c ? c.empresa || c.nome : '', prazo, String(t.descricao || '').slice(0, 100)].filter(Boolean)), '#/tarefas');
+    enviados++;
+  }
+  return { lembretes: enviados };
+}
+
 /* ---------- verificação a cada 6 h (pg_cron crm-verificacao, 016_verificacao.sql) ----------
    Testa o Google (renova o acesso e lê a lista de agendas) e o Gemini (uma pergunta mínima, que também mostra se os créditos acabaram).
    Funcionando: as falhas daquela origem saem da tela (resolvida = true; a linha continua no banco e o crm_log guarda a mudança).
@@ -302,8 +319,9 @@ Deno.serve(async req => {
       const { data } = await db.from('crm_config').select('valor').eq('chave', 'cron_key').maybeSingle();
       if (!data?.valor || cron !== data.valor) return json({ erro: 'Sem permissão' }, 401);
       // aviso avulso de outra função (ex.: crm-agendar quando alguém marca pelo site); sem aviso, é o resumo das 7h30
-      const { aviso, verificar } = await req.json().catch(() => ({}));
+      const { aviso, verificar, lembretes: lemb } = await req.json().catch(() => ({}));
       if (verificar) return json(await verificacao());
+      if (lemb) return json(await lembretes());
       if (aviso?.titulo) return json(await notificar(String(aviso.titulo).slice(0, 80), String(aviso.corpo || '').slice(0, 200), String(aviso.url || '').startsWith('app.html#/') ? String(aviso.url).slice(8) : '#/agenda'));
       const r = await retrato(), enviados = [await notificar('Bom dia, Sabrina! ☀️', resumoCurto(r))];
       const al = await alertas(r);

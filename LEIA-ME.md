@@ -53,7 +53,10 @@ Escopos pedidos ao conectar (lista `ESCOPOS` em `crm-google`): `calendar.events`
 
 ### Agenda pública (rovyacreative.com.br/agendar)
 
-A Sabrina marca na Agenda **Reservar horários**: um evento “Reservado · novos clientes” (livre, `crm_reserva=1`, `crm_slot` = minutos de cada conversa), que pode repetir toda semana.
+A Sabrina abre Agenda → **Horários da semana** (`#/horarios`, `#/horarios/1` = próxima semana) e pinta a semana hora a hora, das 6h às 22h, escolhendo o tipo. Horas seguidas do mesmo tipo viram um evento só. Com “Repetir toda semana” (marcado por padrão), o evento repete sem fim, até ela tirar. Tocar num horário já marcado oferece “Tirar só este dia” ou “Tirar todas as semanas”.
+- **Rovya:** evento “Reservado · novos clientes” na profissional (livre, `crm_reserva=1`, `crm_slot=60`); é o que o site oferece.
+- **Pessoal:** evento ocupado na agenda pessoal (`crm_bloco=pessoal`), ou privado na profissional se não houver pessoal. Só bloqueia.
+- **BNI:** evento ocupado “BNI” na profissional (`crm_bloco=bni`). Só bloqueia.
 A página `site/agendar.html` chama a função **crm-agendar** (sem login): ela divide as reservas em conversas e tira o que bate com qualquer compromisso das agendas profissional e pessoal (só devolve início e fim, nunca o que há na agenda).
 Ao reservar: trava o horário em `crm_agendamentos` (índice único), acha ou cadastra o cliente (origem “Agenda do site”), cria a reunião com Meet e convite na agenda profissional, registra no histórico, abre a oportunidade e avisa no celular (pela `crm-assistente`, com a `cron_key`).
 Regras fixas no código: 12 h de antecedência, até 45 dias para frente, 3 agendamentos por dia do mesmo IP, 2 futuros por e-mail.
@@ -75,7 +78,11 @@ A função `crm-assistente` usa o **Gemini pago** (`gemini-3.8-flash`). O nível
 1. Em https://aistudio.google.com/apikey → **Criar chave de API** → projeto **CRM SA**. A coluna "Plano" precisa dizer **Pago**. Se disser "Free", clique em **Configurar faturamento**.
 2. No Supabase (rovya-stickers) → **Edge Functions → Secrets** → crie `GEMINI_API_KEY` com a chave.
 3. (Opcional) Em console.cloud.google.com/billing/budgets, crie um orçamento de R$ 30/mês, que só avisa por e-mail.
-4. No celular, instale o app (Adicionar à tela inicial) → **Assistente** → **🔔 Receber resumo às 7h30** → **Testar notificação**.
+4. Em cada aparelho (celular e computador): **Tarefas** ou **Assistente** → **🔔 Ativar notificações neste aparelho** → **Testar notificação**. No iPhone, só com o app instalado (Compartilhar → Adicionar à Tela de Início) e aberto pelo ícone. Sem nenhum aparelho ativado (`crm_push` vazio), nenhum aviso chega.
+
+**Lembretes das tarefas** (`supabase/019_lembretes.sql`): na tarefa, "Lembrete (dia e hora)". O pg_cron `crm-lembretes` olha a cada minuto e só chama a função (`{"lembretes":true}`) quando há lembrete vencido, não enviado, de tarefa não feita. A notificação "⏰ título" (cliente, prazo e descrição) vai para todos os aparelhos ativados e abre Tarefas. Não usa IA. Cada lembrete sai uma vez (`lembrete_enviado`); mudar o horário faz valer de novo (trigger `crm_lembrete`).
+
+**Login vencido em segundo plano:** o login vale 1 h. Uma aba esquecida (e o quadro da cópia completa) pode chamar uma função com ele vencido há segundos: o banco ainda aceita, porque tolera 30 s, mas a função recusa ("Sem permissão" em crm-google/listar a cada 90 min). `funcao()` em `util.js` renova o login quando falta menos de 1 min e, se vier 401, renova e tenta de novo uma vez antes de anotar a falha.
 
 O resumo diário sai pelo pg_cron `crm-resumo-diario` (10:30 UTC = 07:30 em Brasília), que chama a função com o header `x-cron`. Na mesma hora vão também:
 - **"Precisa da sua atenção"** (só se houver algo): cliente com oportunidade aberta e sem contato há 10+ dias (`SEM_RETORNO_DIAS`), proposta enviada que vence em até 3 dias, contrato vigente dentro do `aviso_dias`, e parcelas a receber atrasadas.
