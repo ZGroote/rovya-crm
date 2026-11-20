@@ -112,7 +112,7 @@ async function inicio() {
     <section class="card" id="agHoje"><h3>Agenda de hoje</h3><p class="vazio">Carregando…</p></section>
   </div>
   <h2 style="margin:28px 0 12px">Projetos ativos</h2>
-  <div class="grade">${projs.map(p => `<a class="card linkcard" href="#/projeto/${p.id}"><b>${esc(p.nome)}</b><p class="mute" style="margin:2px 0 12px">${esc(p.crm_clientes?.nome)}</p><div class="barra"><i style="width:${progresso(p)}%"></i></div><small class="mute">${progresso(p)}% aprovado</small></a>`).join('') || '<p class="vazio">Nenhum projeto ativo.</p>'}</div>`;
+  <div class="grade">${projs.map(p => `<a class="card linkcard" href="#/projeto/${p.id}"><b>${esc(p.nome)}</b><p class="mute" style="margin:2px 0 12px">${esc(p.crm_clientes?.nome || 'Rovya')}</p><div class="barra"><i style="width:${progresso(p)}%"></i></div><small class="mute">${progresso(p)}% aprovado</small></a>`).join('') || '<p class="vazio">Nenhum projeto ativo.</p>'}</div>`;
   $('#nCli').onclick = async () => { const c = await novoCliente(); if (c) location.hash = '#/cliente/' + c.id; };
   $('#nOp').onclick = async () => { if (await novaOportunidade()) location.hash = '#/funil'; };
   ligarLinhas($('#cTarefas'), tars, inicio);
@@ -295,13 +295,13 @@ async function projetos(arquivados) {
   const sel = sb.from('crm_projetos').select('*,crm_clientes(nome,empresa),crm_etapas(crm_entregas(status))');
   const ps = await q((arquivados ? sel : sel.neq('status', 'arquivado')).order('criado_em', { ascending: false })); // arquivados só quando ela pede
   const prog = p => { const es = p.crm_etapas.flatMap(e => e.crm_entregas); return es.length ? Math.round(100 * es.filter(e => e.status === 'aprovado').length / es.length) : 0; };
-  const grupo = st => ps.filter(p => p.status === st).map(p => `<a class="card linkcard" href="#/projeto/${p.id}"><b>${esc(p.nome)}</b><p class="mute" style="margin:2px 0 12px">${esc(p.crm_clientes?.empresa || p.crm_clientes?.nome)}${p.entrega_prevista ? ' · entrega ' + dataBR(p.entrega_prevista) : ''}</p><div class="barra"><i style="width:${prog(p)}%"></i></div><small class="mute">${prog(p)}% aprovado</small></a>`).join('');
+  const grupo = st => ps.filter(p => p.status === st).map(p => `<a class="card linkcard" href="#/projeto/${p.id}"><b>${esc(p.nome)}</b><p class="mute" style="margin:2px 0 12px">${esc(p.crm_clientes?.empresa || p.crm_clientes?.nome || 'Rovya')}${p.entrega_prevista ? ' · entrega ' + dataBR(p.entrega_prevista) : ''}</p><div class="barra"><i style="width:${prog(p)}%"></i></div><small class="mute">${prog(p)}% aprovado</small></a>`).join('');
   main.innerHTML = `<div class="topo"><div><div class="eyebrow">Produção</div><h1>Projetos</h1></div><div class="acoes"><a class="bt sec" href="#/projetos${arquivados ? '' : '/arquivados'}">${arquivados ? 'Esconder arquivados' : 'Mostrar arquivados'}</a><button class="bt" id="nProj">+ Projeto</button></div></div>
     ${STATUS_PROJ.map(([k, l]) => { const g = grupo(k); return g ? `<h2 style="margin:8px 0 12px">${l}</h2><div class="grade" style="margin-bottom:26px">${g}</div>` : ''; }).join('') || '<p class="vazio">Nenhum projeto ainda. Projetos nascem quando uma oportunidade é fechada no funil, ou pelo botão acima.</p>'}`;
   $('#nProj').onclick = async () => {
-    const cs = await listaClientes(); if (!cs.length) { toast('Cadastre um cliente primeiro'); return; }
-    const v = await formulario('Para qual cliente?', [{ k: 'c', l: 'Cliente', t: 'select', o: opcoesClientes(cs) }]); if (!v) return;
-    const c = cs.find(x => x.id === v.c); await criarProjeto(c.id, c.empresa || c.nome);
+    const cs = await listaClientes();
+    const v = await formulario('Para qual cliente?', [{ k: 'c', l: 'Cliente', t: 'select', o: [['', 'Rovya (projeto interno)'], ...opcoesClientes(cs)] }]); if (!v) return;
+    const c = cs.find(x => x.id === v.c); await criarProjeto(c?.id ?? null, c ? c.empresa || c.nome : '');
   };
 }
 async function projeto(id, aba = 'etapas') {
@@ -310,7 +310,7 @@ async function projeto(id, aba = 'etapas') {
   p.crm_etapas.sort((a, b) => a.ordem - b.ordem); p.crm_etapas.forEach(e => e.crm_entregas.sort((a, b) => a.ordem - b.ordem));
   const es = p.crm_etapas.flatMap(e => e.crm_entregas), ok = es.filter(e => e.status === 'aprovado').length, pct = es.length ? Math.round(100 * ok / es.length) : 0;
   const c = p.crm_clientes, recebido = p.crm_parcelas.filter(x => x.pago_em && x.tipo !== 'despesa').reduce((s, x) => s + +x.valor, 0);
-  main.innerHTML = `<div class="topo"><div><div class="eyebrow"><a href="#/cliente/${c.id}">${esc(c.empresa || c.nome)}</a></div><h1>${esc(p.nome)}</h1>
+  main.innerHTML = `<div class="topo"><div><div class="eyebrow">${c ? `<a href="#/cliente/${c.id}">${esc(c.empresa || c.nome)}</a>` : 'Rovya · projeto interno'}</div><h1>${esc(p.nome)}</h1>
       <p>${ok} de ${es.length} entregas aprovadas${p.entrega_prevista ? ' · entrega prevista ' + dataBR(p.entrega_prevista) : ''}</p></div>
     <div class="acoes">${p.status === 'arquivado' ? `<span class="pill">Arquivado ${dataBR(p.arquivado_em)}${p.retencao ? ' · ' + esc(rotulo(RETENCAO, p.retencao).split(' (')[0]) : ''}</span><button class="bt sec" id="desarq">Desarquivar</button>`
       : `<select id="st" class="busca" style="min-width:0">${STATUS_PROJ.filter(s => s[0] !== 'arquivado').map(([k, l]) => `<option value="${k}" ${k === p.status ? 'selected' : ''}>${l}</option>`).join('')}</select><button class="bt sec" id="encerrar">Encerrar</button>`}<button class="bt sec" id="ed">Editar</button></div></div>
@@ -376,7 +376,7 @@ async function abrirEntrega(x, p) {
     { k: 'status', l: 'Status', t: 'select', o: STATUS_ENT, meia: true }, { k: 'prazo', l: 'Prazo', t: 'date', meia: true },
     { k: 'formato', l: 'Formato da peça', t: 'select', o: [['', '—'], ...[...new Set([...FORMATOS, 'Outro', x.formato].filter(Boolean))].map(f => [f, f])] },
     { k: 'texto', l: 'Texto de entrega para o cliente', t: 'textarea', linhas: 9 },
-    { k: 'link', l: 'Link (Canva, Heyzine, Drive…)' }], { ...x, texto: x.texto ?? `${(p.crm_clientes.nome || '').split(' ')[0]}, ` }, extra);
+    { k: 'link', l: 'Link (Canva, Heyzine, Drive…)' }], { ...x, texto: x.texto ?? (p.crm_clientes ? `${(p.crm_clientes.nome || '').split(' ')[0]}, ` : '') }, extra);
   $('#dlgf').querySelectorAll('[data-del-anexo]').forEach(b => b.onclick = async () => {
     const a = anexos.find(z => z.id === b.dataset.delAnexo);
     await q(sb.storage.from('crm-anexos').remove([a.caminho])); await q(sb.from('crm_anexos').delete().eq('id', a.id)); b.parentElement.remove(); toast('Arquivo removido');

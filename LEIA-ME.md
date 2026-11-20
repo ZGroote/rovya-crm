@@ -82,6 +82,8 @@ A função `crm-assistente` usa o **Gemini pago** (`gemini-3.8-flash`). O nível
 
 **Lembretes das tarefas** (`supabase/019_lembretes.sql`): na tarefa, "Lembrete (dia e hora)". O pg_cron `crm-lembretes` olha a cada minuto e só chama a função (`{"lembretes":true}`) quando há lembrete vencido, não enviado, de tarefa não feita. A notificação "⏰ título" (cliente, prazo e descrição) vai para todos os aparelhos ativados e abre Tarefas. Não usa IA. Cada lembrete sai uma vez (`lembrete_enviado`); mudar o horário faz valer de novo (trigger `crm_lembrete`).
 
+**Projetos da Rovya** (`supabase/020_projeto_rovya.sql`): em "+ Projeto", a primeira opção é "Rovya (projeto interno)". O projeto fica sem cliente (`cliente_id` nulo) e as telas mostram "Rovya" no lugar do cliente.
+
 **Login vencido em segundo plano:** o login vale 1 h. Uma aba esquecida (e o quadro da cópia completa) pode chamar uma função com ele vencido há segundos: o banco ainda aceita, porque tolera 30 s, mas a função recusa ("Sem permissão" em crm-google/listar a cada 90 min). `funcao()` em `util.js` renova o login quando falta menos de 1 min e, se vier 401, renova e tenta de novo uma vez antes de anotar a falha.
 
 O resumo diário sai pelo pg_cron `crm-resumo-diario` (10:30 UTC = 07:30 em Brasília), que chama a função com o header `x-cron`. Na mesma hora vão também:

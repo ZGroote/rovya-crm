@@ -71,7 +71,7 @@ async function retrato() {
     agora: new Date().toLocaleTimeString('pt-BR', { timeZone: TZ, hour: '2-digit', minute: '2-digit' }), // "daqui 2 horas"
     clientes: (cli.data ?? []).map(c => ({ id: c.id, codigo: c.codigo, nome: c.nome, empresa: c.empresa, origem: c.origem, desde: c.criado_em?.slice(0, 10) })),
     funil: (ops.data ?? []).map((o: any) => ({ id: o.id, cliente_id: o.cliente_id, cliente: quem(o.crm_clientes), oportunidade: o.titulo, etapa: o.etapa, valor: o.valor, proximo_passo: o.proximo_passo, proximo_em: o.proximo_em, motivo_perda: o.motivo_perda, atualizado: o.atualizado_em?.slice(0, 10) })),
-    projetos: (projs.data ?? []).map((p: any) => ({ id: p.id, nome: p.nome, cliente: quem(p.crm_clientes), status: p.status, valor: p.valor, inicio: p.inicio, entrega_prevista: p.entrega_prevista,
+    projetos: (projs.data ?? []).map((p: any) => ({ id: p.id, nome: p.nome, cliente: quem(p.crm_clientes) || 'Rovya (projeto interno)', status: p.status, valor: p.valor, inicio: p.inicio, entrega_prevista: p.entrega_prevista,
       etapas: (p.crm_etapas ?? []).sort((a: any, b: any) => a.ordem - b.ordem).map((e: any) => ({ etapa: e.titulo,
         entregas: (e.crm_entregas ?? []).sort((a: any, b: any) => a.ordem - b.ordem).map((x: any) => `${x.titulo} [${x.status}${x.prazo ? ', prazo ' + x.prazo : ''}]`) })) })),
     totais_por_ano_pagos: totais, // receitas recebidas e despesas pagas de todos os anos (os lançamentos abaixo são só do último ano + em aberto)

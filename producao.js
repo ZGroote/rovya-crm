@@ -13,7 +13,7 @@ export async function producao(abrirEntrega, projetoId = '') {
   const projs = [...new Map(es.map(x => [x.crm_etapas.crm_projetos.id, x.crm_etapas.crm_projetos])).values()];
   const desde = diaLocal(-30); // aprovadas há mais de 30 dias saem do quadro (continuam no projeto)
   const vis = es.filter(x => (!projetoId || x.crm_etapas.crm_projetos.id === projetoId) && (x.status !== 'aprovado' || (x.aprovado_em || '') >= desde));
-  const nome = p => p.crm_clientes?.empresa || p.crm_clientes?.nome || p.nome;
+  const nome = p => p.crm_clientes?.empresa || p.crm_clientes?.nome || 'Rovya';
   main.innerHTML = `<div class="topo"><div><div class="eyebrow">Operação</div><h1>Produção</h1><p>Todas as peças dos projetos ativos. Arraste entre as colunas ou abra a peça para mudar o status, o formato e anexar arquivos.</p></div>
     <select class="busca" id="filtroProj" style="min-width:0"><option value="">Todos os projetos</option>${projs.map(p => `<option value="${p.id}" ${p.id === projetoId ? 'selected' : ''}>${esc(nome(p))} · ${esc(p.nome)}</option>`).join('')}</select></div>
     ${es.length ? '' : '<p class="vazio">Nenhuma peça em projetos ativos. As peças são as entregas de cada etapa do projeto.</p>'}
