@@ -65,12 +65,28 @@ function montarEmail(para: string, assunto: string, texto: string, anexos: { nom
 const TABELAS = ['crm_clientes', 'crm_oportunidades', 'crm_interacoes', 'crm_servicos', 'crm_propostas', 'crm_contratos', 'crm_projetos', 'crm_etapas',
   'crm_entregas', 'crm_anexos', 'crm_tarefas', 'crm_parcelas', 'crm_modelos', 'crm_documentos', 'crm_drive', 'crm_agendamentos', 'crm_links'];
 const MANTER = 12, DRIVE = 'https://www.googleapis.com/drive/v3/files';
+// pasta do backup: a "15" da estrutura. Se a estrutura ainda não foi criada, cria só a raiz e a 15 (mesmos nomes da tela Documentos),
+// e o "Criar estrutura" depois aproveita as duas e cria o resto.
+async function pastaBackup(token: string) {
+  const { data: ls } = await db.from('crm_drive').select('chave,folder_id,nome').in('chave', ['raiz', '15']);
+  const de = (k: string) => (ls ?? []).find((x: any) => x.chave === k);
+  if (de('15')?.folder_id) return de('15').folder_id as string;
+  const criar = async (name: string, pai?: string) => {
+    const r = await fetch(DRIVE + '?fields=id', { method: 'POST', headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, mimeType: 'application/vnd.google-apps.folder', parents: pai ? [pai] : undefined }) });
+    const j = await r.json(); if (!j.id) throw new Error(j.error?.message || 'Drive'); return j.id as string;
+  };
+  const raiz = de('raiz')?.folder_id || await criar('ROVYA — GESTÃO EMPRESARIAL'), nome = de('15')?.nome || '15 — Tecnologia e Sistemas';
+  const id = await criar(nome, raiz);
+  await db.from('crm_drive').upsert([{ chave: 'raiz', folder_id: raiz, nome: 'ROVYA — GESTÃO EMPRESARIAL' }, { chave: '15', folder_id: id, nome }]);
+  return id;
+}
 async function backupSemanal() {
   const falha = async (m: string) => { await db.from('crm_falhas').insert({ origem: 'backup', acao: 'backup semanal', mensagem: m }); return { ok: false, erro: m }; };
   const t = await tokenGoogle();
   if (!t) return falha('O backup automático da semana não foi feito: o Google da Rovya não está conectado (Agenda → Conectar). Enquanto isso, baixe um backup manual em Configurações.');
-  const { data: pasta } = await db.from('crm_drive').select('folder_id').eq('chave', '15').maybeSingle();
-  if (!pasta?.folder_id) return falha('O backup automático da semana não foi feito: a pasta “15 — Tecnologia e Sistemas” ainda não existe no Drive. Em Documentos, clique em “Conferir estrutura”.');
+  const pasta = { folder_id: await pastaBackup(t.token).catch(() => null) };
+  if (!pasta.folder_id) return falha('O backup automático da semana não foi feito: não deu para criar a pasta “15 — Tecnologia e Sistemas” no Drive. Em Documentos, clique em “Conferir estrutura”.');
   const tabelas: Record<string, unknown[]> = {};
   for (const tb of TABELAS) {
     let todos: unknown[] = [];
@@ -159,7 +175,8 @@ Deno.serve(async req => {
   switch (b.acao) {
     case 'token': { // drive.file só enxerga o que o CRM criou; o token vale 1 h
       const info = await (await fetch('https://oauth2.googleapis.com/tokeninfo?access_token=' + t.token)).json();
-      return json({ token: t.token, email: t.email, drive: String(info.scope || '').includes('drive.file') });
+      const { data: chave } = await db.from('crm_config').select('valor').eq('chave', 'google_picker_key').maybeSingle();
+      return json({ token: t.token, email: t.email, drive: String(info.scope || '').includes('drive.file'), picker: chave?.valor ? { chave: chave.valor, app: CID.split('-')[0] } : null });
     }
     case 'listar': {
       const a = t.agendas;

@@ -56,14 +56,44 @@ export async function garantirEstrutura() {
 }
 
 // pasta CLIENTE_[CODIGO]_[NOME] dentro de "07 — Clientes e Onboarding", com as subpastas escolhidas
-export async function criarPastaCliente(c) {
+// pasta que ela já tinha no Drive (criada fora do CRM): escolhida na janela do próprio Google (Picker).
+// Escolher ali é o que libera essa pasta para o CRM (drive.file); as subpastas novas são criadas dentro dela.
+let apiGoogle;
+const carregarPicker = () => apiGoogle ||= new Promise((ok, erro) => {
+  const s = document.createElement('script'); s.src = 'https://apis.google.com/js/api.js';
+  s.onload = () => gapi.load('picker', { callback: ok, onerror: () => erro(new Error('Não deu para abrir a janela do Google.')) });
+  s.onerror = () => { apiGoogle = null; erro(new Error('Não deu para abrir a janela do Google. Confira a internet.')); };
+  document.head.append(s);
+});
+export async function escolherPastaNoDrive(titulo) {
+  const r = await funcao('crm-google', 'token');
+  if (r.conectado === false) throw new Error('Google não conectado. Vá em Agenda → Conectar.');
+  if (!r.picker) throw new Error('A escolha de pasta do Drive ainda não foi configurada (falta a chave do Google Picker).');
+  await carregarPicker();
+  const G = window.google.picker;
+  return new Promise(ok => new G.PickerBuilder()
+    .addView(new G.DocsView(G.ViewId.FOLDERS).setSelectFolderEnabled(true).setIncludeFolders(true).setMimeTypes(PASTA))
+    .setOAuthToken(r.token).setDeveloperKey(r.picker.chave).setAppId(r.picker.app).setLocale('pt-BR').setTitle(titulo)
+    .setCallback(d => { if (d.action === G.Action.PICKED) ok(d.docs[0].id); else if (d.action === G.Action.CANCEL) ok(null); })
+    .build().setVisible(true));
+}
+// cliente sem pasta: criar uma nova ou usar a que ele já tem no Drive
+export async function pastaDoCliente(c) {
+  const nova = await formulario('Este cliente ainda não tem pasta no Drive', [], {},
+    '<p class="mute" style="margin:0">Se ele já tem uma pasta no seu Drive, use “Usar pasta que já existe” e escolha a pasta. O CRM passa a guardar os arquivos dele lá.</p><button class="bt sec" value="existente" formnovalidate style="justify-self:start">Usar pasta que já existe</button>', 'Criar pasta nova');
+  if (nova) return criarPastaCliente(c);
+  if ($('#dlg').returnValue !== 'existente') return null;
+  const id = await escolherPastaNoDrive(`Pasta de ${c.empresa || c.nome}`);
+  return id ? criarPastaCliente(c, id) : null;
+}
+export async function criarPastaCliente(c, existente = null) {
   const marcadas = await escolherSubpastas(c, Object.keys(c.drive_subpastas || {}));
   if (!marcadas) return null;
   toast('Criando pastas no Drive…');
   const codigo = c.codigo || await q(sb.rpc('crm_dar_codigo', { p_cliente: c.id }));
   const ids = await garantirEstrutura();
-  let pasta = c.drive_pasta && await existe(c.drive_pasta) ? c.drive_pasta : null;
-  const subs = pasta ? { ...(c.drive_subpastas || {}) } : {};
+  let pasta = existente || (c.drive_pasta && await existe(c.drive_pasta) ? c.drive_pasta : null);
+  const subs = pasta && !existente ? { ...(c.drive_subpastas || {}) } : {};
   if (!pasta) pasta = await criarPasta(`CLIENTE_${codigo}_${slug(c.empresa || c.nome)}`, ids[AREA_CLIENTES]);
   for (const [k, n] of SUBPASTAS) if (marcadas.includes(k) && !subs[k]) subs[k] = await criarPasta(`${k} ${n}`, pasta);
   await q(sb.from('crm_clientes').update({ drive_pasta: pasta, drive_subpastas: subs }).eq('id', c.id));
@@ -141,11 +171,11 @@ export async function cartaoDrive(c) {
     ? `<p style="margin:4px 0 10px"><a href="${pastaLink(c.drive_pasta)}" target="_blank" rel="noopener">Abrir pasta CLIENTE_${esc(c.codigo || '')} →</a></p>
        <ul class="lista">${docs.map(linhaDoc).join('') || '<li class="vazio">Nenhum arquivo enviado pelo CRM ainda.</li>'}</ul>
        <div class="acoes" style="margin-top:8px"><button class="bt peq" data-drive="enviar">Enviar arquivo</button><button class="bt peq fantasma" data-drive="pasta">Subpastas</button></div>`
-    : `<p class="mute">Este cliente ainda não tem pasta no Drive.</p><button class="bt peq sec" data-drive="pasta">Criar pasta no Drive</button>`}</section>`;
+    : `<p class="mute">Este cliente ainda não tem pasta no Drive.</p><button class="bt peq sec" data-drive="pasta">Pasta no Drive</button>`}</section>`;
 }
 export function ligarCartaoDrive(c, recarregar) {
   main.querySelectorAll('[data-drive]').forEach(b => b.onclick = async () => {
-    try { if (b.dataset.drive === 'pasta' ? await criarPastaCliente(c) : await dialogoEnviar(c)) recarregar(); }
+    try { if (b.dataset.drive === 'pasta' ? await (c.drive_pasta ? criarPastaCliente(c) : pastaDoCliente(c)) : await dialogoEnviar(c)) recarregar(); }
     catch (e) { toast(e.message, true); }
   });
 }

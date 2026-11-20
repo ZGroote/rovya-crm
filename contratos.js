@@ -1,6 +1,6 @@
 // Contratos: recorrentes, avulsos e mistos. Só alerta datas; nada muda de status sozinho.
 import { sb, $, main, esc, brl, hoje, diaLocal, dataBR, toast, q, rotulo, formulario, confirma, listaClientes, opcoesClientes, anexosGrandes } from './util.js';
-import { enviarAoDrive, criarPastaCliente, linhaDoc } from './drive.js';
+import { enviarAoDrive, pastaDoCliente, linhaDoc } from './drive.js';
 import { lancarMensalidades } from './financeiro.js';
 
 const TIPOS = [['recorrente', 'Recorrente'], ['avulso', 'Avulso'], ['misto', 'Misto']];
@@ -149,7 +149,7 @@ export async function contrato(id) {
   };
   $('#envDrive').onclick = async () => {
     try {
-      if (!cli.drive_pasta && !(await confirma('Este cliente ainda não tem pasta no Drive. Criar agora?') && await criarPastaCliente(cli))) return;
+      if (!cli.drive_pasta && !await pastaDoCliente(cli)) return;
       if (!await formulario('Enviar ao Drive', [], {}, '<p class="mute">Normalmente o PDF do contrato assinado.</p><label>Arquivo<input type="file" id="contrDrive" required></label>', 'Enviar')) return;
       const arquivo = $('#contrDrive').files[0]; if (!arquivo) return; // o diálogo continua no DOM depois de fechar
       await enviarAoDrive({ cliente: cli, arquivo, tipo: 'CONTRATO', subpasta: '03', vinculo: { contrato_id: c.id }, classificacao: 'confidencial' });

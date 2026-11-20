@@ -84,6 +84,8 @@ A função `crm-assistente` usa o **Gemini pago** (`gemini-3.8-flash`). O nível
 
 **Projetos da Rovya** (`supabase/020_projeto_rovya.sql`): em "+ Projeto", a primeira opção é "Rovya (projeto interno)". O projeto fica sem cliente (`cliente_id` nulo) e as telas mostram "Rovya" no lugar do cliente.
 
+**Pasta que o cliente já tem no Drive:** quando o cliente está sem pasta, o CRM oferece "Criar pasta nova" ou "Usar pasta que já existe". A segunda abre o Google Picker, e escolher a pasta ali libera o acesso dela para o drive.file. A chave fica em `crm_config.google_picker_key`: é uma chave de API do projeto CRM SA, restrita ao Google Picker e ao site crm.rovyacreative.com.br. **Backup:** se a pasta 15 ainda não existir, o backup semanal cria a raiz e a 15 sozinho.
+
 **Login vencido em segundo plano:** o login vale 1 h. Uma aba esquecida (e o quadro da cópia completa) pode chamar uma função com ele vencido há segundos: o banco ainda aceita, porque tolera 30 s, mas a função recusa ("Sem permissão" em crm-google/listar a cada 90 min). `funcao()` em `util.js` renova o login quando falta menos de 1 min e, se vier 401, renova e tenta de novo uma vez antes de anotar a falha.
 
 O resumo diário sai pelo pg_cron `crm-resumo-diario` (10:30 UTC = 07:30 em Brasília), que chama a função com o header `x-cron`. Na mesma hora vão também:

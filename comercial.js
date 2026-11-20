@@ -1,7 +1,7 @@
 // comercial: catálogo de serviços e propostas versionadas (tabelas crm_servicos e crm_propostas)
 import { sb, $, main, esc, brl, hoje, diaLocal, dataBR, venceu, toast, q, rotulo, preencher, mdHtml, formulario, confirma, listaClientes, opcoesClientes } from './util.js';
 import { novoContrato } from './contratos.js';
-import { enviarAoDrive, criarPastaCliente, linhaDoc } from './drive.js';
+import { enviarAoDrive, pastaDoCliente, linhaDoc } from './drive.js';
 
 const STATUS_PROP = [['rascunho', 'Rascunho'], ['enviada', 'Enviada'], ['aprovada', 'Aprovada'], ['recusada', 'Recusada']];
 const COR_PROP = { rascunho: 'p-a_fazer', enviada: 'p-enviado', aprovada: 'p-aprovado', recusada: 'p-revisao' };
@@ -175,7 +175,7 @@ export async function proposta(id) {
   $('#pdf').onclick = async () => { await salvar(); imprimir(p, c); };
   $('#envDrive').onclick = async () => {
     try {
-      if (!c.drive_pasta && !(await confirma('Este cliente ainda não tem pasta no Drive. Criar agora?') && await criarPastaCliente(c))) return;
+      if (!c.drive_pasta && !await pastaDoCliente(c)) return;
       if (!await formulario('Enviar PDF ao Drive', [], {}, '<p class="mute">Use o PDF que você salvou em “Gerar PDF”.</p><label>Arquivo PDF<input type="file" id="pdfDrive" accept="application/pdf" required></label>', 'Enviar')) return;
       const arquivo = $('#pdfDrive').files[0]; if (!arquivo) return; // o diálogo continua no DOM depois de fechar
       await enviarAoDrive({ cliente: c, arquivo, tipo: 'PROPOSTA', subpasta: '03', versao: p.versao, vinculo: { proposta_id: p.id }, classificacao: 'cliente' });
