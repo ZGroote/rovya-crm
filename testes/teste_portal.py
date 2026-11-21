@@ -22,7 +22,9 @@ BASE = {'cliente': {'nome': 'Paulo Mendes', 'empresa': 'Imobiliária Horizonte',
                 ent(1, 'enviado', titulo='Post de lançamento', texto='## Legenda\nTexto final', link='https://canva.com/x', anexos=[{'nome': 'post.png', 'url': 'data:image/png;base64,iVBORw0KGgo=', 'tamanho': 1000}, {'nome': 'Plano.pdf', 'url': 'https://assinada/plano.pdf', 'tamanho': 2097152}]),
                 ent(2, 'enviado', titulo='Carrossel', texto='Slides', link='javascript:alert(1)', anexos=[]),
                 ent(3, 'aprovado', texto='ok', link=None, anexos=[]),
-                ent(4, 'produzindo', prazo='2026-12-01')]}]}],
+                ent(4, 'produzindo', prazo='2026-12-01')]},
+            {'titulo': 'Guia de Publicação', 'consulta': True, 'orientacao': None, 'entregas': [
+                ent(5, 'aprovado', titulo='Como usar', texto='## Passo 1\n---\nLeia com calma', link=None, anexos=[]), ent(6, 'a_fazer', titulo='Guia')]}]}],
         'pedidos': [{'titulo': 'Ajuste pedido pelo cliente: Banner', 'descricao': 'Trocar cor', 'status': 'fazendo', 'criado_em': '2026-11-20T10:00:00Z'}]}
 with sync_playwright() as p:
     b = p.chromium.launch(executable_path=r'C:\Program Files\Google\Chrome\Application\chrome.exe')
@@ -73,10 +75,23 @@ with sync_playwright() as p:
     # planejamento, arquivos, estratégia
     pg.click('.abas [data-a=planejamento]')
     plano = pg.inner_text('#aba')
-    ok('Gestão de comunicação' in plano and '1 de 4 entregas aprovadas' not in plano and '2 de 4 entregas aprovadas' in plano and 'Em ajuste' in plano and 'até 01 de dez' in plano, 'planejamento: progresso, status e prazo')
-    ok(pg.locator('#aba details.ent').count() == 3 and pg.locator('#aba div.ent').count() == 1, 'só o que foi enviado abre conteúdo; em produção é só a linha')
+    ok('Gestão de comunicação' in plano and '2 de 4 aprovadas' in plano and 'Em ajuste' in plano and 'ter, 01/12' in plano, 'quadro: progresso (sem contar a consulta), status e dia')
+    ok(pg.locator('#aba .coluna').count() == 2 and pg.locator('#aba .cartao').count() == 6, 'uma coluna por etapa, um cartão por entrega')
+    ok(pg.inner_text('.cartao[data-cartao=x5] .pill') == 'Para ler' and pg.inner_text('.cartao[data-cartao=x6] .pill') == 'Em preparação', 'cartões só consulta: "Para ler" ou "Em preparação"')
     pg.click('#aba details.ori summary'); ok(pg.locator('#aba details.ori .txt').inner_text().startswith('Oi, Paulo'), 'orientação da etapa')
+    pg.click('.cartao[data-cartao=x4]'); pg.wait_for_selector('#dlgCartao[open]')
+    ok('Em produção' in pg.inner_text('#dlgCorpo') and 'Data: 01/12/2026 — Terça-feira' in pg.inner_text('#dlgCorpo'), 'cartão em produção: data por extenso e sem conteúdo')
+    pg.click('#dlgCartao .fechar'); pg.wait_for_selector('#dlgCartao[open]', state='detached')
+    pg.click('.cartao[data-cartao=x5]'); pg.wait_for_selector('#dlgCartao[open]')
+    ok(pg.locator('#dlgCorpo hr').count() == 1 and pg.locator('#dlgCorpo [data-aprovar]').count() == 0, 'consulta: texto com linha divisória e sem botão de aprovar')
+    pg.keyboard.press('Escape'); pg.wait_for_selector('#dlgCartao[open]', state='detached')
     pg.screenshot(path='testes/saida/portal_planejamento.png', full_page=True)
+    D['projetos'][0]['etapas'][0]['entregas'][1]['status'] = 'enviado'  # a Sabrina reenviou o carrossel
+    pg.reload(); pg.wait_for_selector('#vPortal:not([hidden])'); pg.wait_for_selector('.cartao[data-cartao=x2].enviado')
+    pg.click('.cartao[data-cartao=x2]'); pg.wait_for_selector('#dlgCorpo [data-aprovar]')
+    pg.screenshot(path='testes/saida/portal_cartao.png')
+    pg.click('#dlgCorpo [data-aprovar]'); pg.wait_for_selector('#dlgCartao[open]', state='detached')
+    ok(chamadas[-2] == {'acao': 'aprovar', 'entrega_id': 'x2'} and pg.inner_text('.cartao[data-cartao=x2] .pill') == '✓ Aprovado', 'aprovar pelo cartão aberto: fecha e atualiza o quadro')
     pg.click('.abas [data-a=arquivos]'); arq = pg.inner_text('#aba')
     ok('Plano.pdf' in arq and '2.0 MB' in arq and 'post.png' in arq, 'arquivos para baixar com tamanho')
     pg.click('.abas [data-a=estrategia]'); ok(pg.inner_text('#aba b.tit') == 'Posicionamento' and pg.locator('#aba .txt b:not(.tit)').inner_text() == 'sem pressa', 'estratégia formatada')

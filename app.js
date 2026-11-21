@@ -4,6 +4,7 @@ import { servicos, servico, propostas, proposta, novaProposta, propostasDoClient
 import { contratos, contrato, novoContrato, alertasContratos, contratosDoCliente } from './contratos.js';
 import { documentos, cartaoDrive, ligarCartaoDrive } from './drive.js';
 import { cartaoPortal, ligarPortal } from './portal.js';
+import { mesDeConteudo, rotuloMes, proximoMes, importarTrello } from './conteudo.js';
 import { financeiro, abaFinanceiro } from './financeiro.js';
 import { configuracoes } from './configuracoes.js';
 import { relatorios } from './relatorios.js';
@@ -240,7 +241,7 @@ async function cliente(id) {
       ${[['Código', c.codigo], ['Razão social', c.razao_social], ['CNPJ/CPF', c.documento], ['E-mail', c.email], ['WhatsApp', c.telefone], ['Instagram', c.instagram], ['Origem', c.origem], ['Cliente desde', c.cliente_desde ? new Date(c.cliente_desde + 'T12:00').toLocaleDateString('pt-BR') : null], ['Primeiro contato', dataBR(c.criado_em.slice(0, 10))]].filter(x => x[1]).map(([l, v]) => `<li><span class="mute" style="min-width:110px">${l}</span><span>${esc(v)}</span></li>`).join('')}</ul>
       ${c.notas ? `<p style="white-space:pre-wrap">${esc(c.notas)}</p>` : ''}</section>
     <section class="card"><h3>Projetos</h3><ul class="lista">${c.crm_projetos.map(p => `<li><a class="cresce" href="#/projeto/${p.id}"><b>${esc(p.nome)}</b></a><span class="pill">${rotulo(STATUS_PROJ, p.status)}</span></li>`).join('') || '<li class="vazio">Nenhum projeto.</li>'}</ul>
-      <button class="bt peq sec" id="nProj">+ Projeto</button></section>
+      <div class="acoes"><button class="bt peq sec" id="nProj">+ Projeto</button><button class="bt peq fantasma" id="impTrello">Importar do Trello</button></div></section>
     <section class="card"><h3>Oportunidades</h3><ul class="lista">${c.crm_oportunidades.map(o => `<li data-op="${o.id}" style="cursor:pointer"><div class="cresce"><b>${esc(o.titulo)}</b><small>${o.valor ? brl(o.valor) + ' · ' : ''}${esc(o.proximo_passo || '')}</small></div><span class="pill">${rotulo(ETAPAS_FUNIL, o.etapa)}</span></li>`).join('') || '<li class="vazio">Nenhuma oportunidade.</li>'}</ul></section>
     <section class="card"><h3>Histórico</h3><ul class="lista">${c.crm_interacoes.slice(0, 15).map(x => `<li data-hist="${x.id}" style="cursor:pointer;align-items:flex-start"><span class="pill">${rotulo(TIPOS_CONTATO, x.tipo)}</span><div class="cresce"><small style="white-space:pre-wrap;color:var(--ink)">${esc(x.resumo)}</small></div>${x._pendente ? '<span class="pill pend" title="Guardado neste aparelho; vai para o banco quando a internet voltar">⏳</span>' : ''}<span class="mute">${dataBR(x.data)}</span></li>`).join('') || '<li class="vazio">Nenhum contato registrado.</li>'}</ul>
       <button class="bt peq sec" id="nHist">+ Registrar contato</button></section>
@@ -268,6 +269,7 @@ async function cliente(id) {
   };
   $('#nOp').onclick = async () => { if (await novaOportunidade(id)) cliente(id); };
   $('#nProj').onclick = async () => { await criarProjeto(id, c.empresa || c.nome); };
+  $('#impTrello').onclick = () => importarTrello(c);
   $('#agendar').onclick = async () => { if (await novoEvento({ cliente_id: id, titulo: 'Reunião · ' + (c.empresa || c.nome), meet: '1', convidar: c.email ? '1' : '' })) compromissosDoCliente(c); };
   if ($('#emailG')) $('#emailG').onclick = async () => { if (await enviarEmail(c)) cliente(id); };
   compromissosDoCliente(c); // não bloqueia a tela
@@ -284,11 +286,20 @@ async function criarProjeto(clienteId, nome, oportunidadeId = null, valor = null
   const mods = await q(sb.from('crm_modelos').select('id,titulo').eq('tipo', 'projeto').order('criado_em'));
   const v = await formulario('Novo projeto', [
     { k: 'nome', l: 'Nome do projeto', req: true },
-    { k: 'modelo', l: 'Começar a partir de', t: 'select', o: [...mods.map(m => [m.id, m.titulo]), ['', 'Projeto em branco']] },
+    { k: 'modelo', l: 'Começar a partir de', t: 'select', o: [...mods.map(m => [m.id, m.titulo]), ['mes', 'Mês de conteúdo (semanas e posts do mês, como no Trello)'], ['', 'Projeto em branco']] },
     { k: 'valor', l: 'Valor do contrato (R$)', t: 'number', meia: true }, { k: 'entrega_prevista', l: 'Entrega prevista', t: 'date', meia: true }],
     { nome, valor, modelo: mods[0]?.id ?? '' });
   if (!v) return;
-  const pid = await q(sb.rpc('crm_projeto_de_modelo', { p_cliente: clienteId, p_nome: v.nome, p_modelo: v.modelo, p_oportunidade: oportunidadeId }));
+  let estrutura = null;
+  if (v.modelo === 'mes') {
+    const m = await formulario('Mês de conteúdo', [{ k: 'mes', l: 'Mês', t: 'month', req: true }], { mes: proximoMes() },
+      '<p class="mute" style="margin:0">Cria Planejamento Estratégico, uma coluna por semana com os posts de segunda, quarta e sexta, Radar e Guia de Publicação. Datas e cartões você muda depois.</p>', 'Criar');
+    if (!m) return;
+    const [c] = clienteId ? await q(sb.from('crm_clientes').select('nome,empresa').eq('id', clienteId)) : [null];
+    estrutura = mesDeConteudo(m.mes, c); v.modelo = null;
+    if (!v.nome.includes(rotuloMes(m.mes))) v.nome += ' · ' + rotuloMes(m.mes);
+  }
+  const pid = await q(sb.rpc('crm_projeto_de_modelo', { p_cliente: clienteId, p_nome: v.nome, p_modelo: v.modelo, p_oportunidade: oportunidadeId, p_estrutura: estrutura }));
   await q(sb.from('crm_projetos').update({ valor: v.valor, entrega_prevista: v.entrega_prevista }).eq('id', pid));
   toast('Projeto criado'); location.hash = '#/projeto/' + pid; return pid;
 }
@@ -306,6 +317,7 @@ async function projetos(arquivados) {
     const c = cs.find(x => x.id === v.c); await criarProjeto(c?.id ?? null, c ? c.empresa || c.nome : '');
   };
 }
+const CAMPO_CONSULTA = { k: 'consulta', l: 'No portal do cliente', t: 'select', o: [['', 'O cliente aprova as entregas desta etapa'], ['1', 'Só consulta: o cliente lê, mas não aprova (planejamento, radar, guia…)']] };
 async function projeto(id, aba = 'etapas') {
   const [p] = await q(sb.from('crm_projetos').select('*,crm_clientes(*),crm_etapas(*,crm_entregas(*,crm_anexos(id))),crm_parcelas(*)').eq('id', id));
   if (!p) { main.innerHTML = '<p class="vazio">Projeto não encontrado.</p>'; return; }
@@ -335,7 +347,7 @@ async function projeto(id, aba = 'etapas') {
   if (aba === 'financeiro') return abaFinanceiro(p, alvo, () => projeto(id, 'financeiro'));
   if (aba === 'tarefas') return abaTarefas(p, alvo);
   alvo.innerHTML = p.crm_etapas.map((e, i) => `<section class="card etapa" data-etapa="${e.id}">
-      <header><div><div class="n">ETAPA ${String(i + 1).padStart(2, '0')}</div><h3>${esc(e.titulo)}</h3></div>
+      <header><div><div class="n">ETAPA ${String(i + 1).padStart(2, '0')}${e.consulta ? ' · <span title="No portal o cliente lê, mas não aprova">SÓ CONSULTA</span>' : ''}</div><h3>${esc(e.titulo)}</h3></div>
         <div class="acoes"><button class="bt peq fantasma" data-ed-etapa="${e.id}">Editar etapa</button><button class="bt peq sec" data-nova-ent="${e.id}">+ Entrega</button></div></header>
       ${e.orientacao ? `<details class="ori"><summary>Orientação para o cliente</summary><div class="txt">${mdHtml(preencher(e.orientacao, c))}</div><button class="bt peq sec" data-copiar="${e.id}">Copiar texto</button></details>` : ''}
       ${e.crm_entregas.map(x => `<div class="ent" data-ent="${x.id}">
@@ -356,14 +368,14 @@ async function projeto(id, aba = 'etapas') {
   });
   alvo.querySelectorAll('[data-ed-etapa]').forEach(b => b.onclick = async () => {
     const e = porEtapa[b.dataset.edEtapa];
-    const v = await formulario('Editar etapa', [{ k: 'titulo', l: 'Título', req: true }, { k: 'orientacao', l: 'Orientação (use {{empresa}} e {{contato}})', t: 'textarea', linhas: 10 }], e,
+    const v = await formulario('Editar etapa', [{ k: 'titulo', l: 'Título', req: true }, CAMPO_CONSULTA, { k: 'orientacao', l: 'Orientação (use {{empresa}} e {{contato}})', t: 'textarea', linhas: 10 }], { ...e, consulta: e.consulta ? '1' : '' },
       '<button class="bt fantasma" value="apagar" formnovalidate style="justify-self:start;color:var(--bad)">Apagar etapa</button>');
     if ($('#dlg').returnValue === 'apagar') { if (await confirma(`Apagar a etapa “${e.titulo}” e suas entregas?`)) { await q(sb.from('crm_etapas').delete().eq('id', e.id)); projeto(id, aba); } return; }
-    if (v) { await q(sb.from('crm_etapas').update(v).eq('id', e.id)); projeto(id, aba); }
+    if (v) { await q(sb.from('crm_etapas').update({ ...v, consulta: !!v.consulta }).eq('id', e.id)); projeto(id, aba); }
   });
   $('#nEtapa').onclick = async () => {
-    const v = await formulario('Nova etapa', [{ k: 'titulo', l: 'Título', req: true }, { k: 'orientacao', l: 'Orientação para o cliente', t: 'textarea', linhas: 8 }]); if (!v) return;
-    await q(sb.from('crm_etapas').insert({ ...v, projeto_id: id, ordem: p.crm_etapas.length + 1 })); projeto(id, aba);
+    const v = await formulario('Nova etapa', [{ k: 'titulo', l: 'Título', req: true }, CAMPO_CONSULTA, { k: 'orientacao', l: 'Orientação para o cliente', t: 'textarea', linhas: 8 }]); if (!v) return;
+    await q(sb.from('crm_etapas').insert({ ...v, consulta: !!v.consulta, projeto_id: id, ordem: p.crm_etapas.length + 1 })); projeto(id, aba);
   };
 }
 async function abrirEntrega(x, p) {
@@ -433,7 +445,7 @@ async function salvarComoModelo(p) {
   const v = await formulario('Salvar como modelo', [{ k: 'titulo', l: 'Nome do modelo', req: true }], { titulo: p.nome });
   if (!v) return;
   const tirar = t => (t || '').replaceAll(p.crm_clientes.empresa || '\u0000', '{{empresa}}').replaceAll((p.crm_clientes.nome || '\u0000').split(' ')[0], '{{contato}}');
-  const estrutura = p.crm_etapas.map(e => ({ titulo: e.titulo, orientacao: tirar(e.orientacao), entregas: e.crm_entregas.map(x => x.titulo) }));
+  const estrutura = p.crm_etapas.map(e => ({ titulo: e.titulo, orientacao: tirar(e.orientacao), consulta: !!e.consulta, entregas: e.crm_entregas.map(x => x.titulo) }));
   await q(sb.from('crm_modelos').insert({ tipo: 'projeto', titulo: v.titulo, estrutura })); toast('Modelo salvo');
 }
 

@@ -17,10 +17,12 @@ const X = {
   x3: ent(3, 'p1', 'aprovado'),
   x9: ent(9, 'p0', 'enviado'),
   y1: ent(11, 'p2', 'enviado'),
+  k1: ent(21, 'p1', 'enviado', { titulo: 'Guia de Publicação', texto: 'Como postar', _consulta: true }),
 };
 const etapa = (p, ents) => ({ id: 'e' + p, ordem: 1, titulo: 'Planejamento', orientacao: 'Oi, {{contato}}! Bem-vinda, {{empresa}}.', crm_entregas: ents });
-for (const p of Object.values(P)) p.crm_etapas = [etapa(p.id, Object.values(X).filter(x => x._p === p.id))];
-for (const x of Object.values(X)) x.crm_etapas = { projeto_id: x._p, crm_projetos: P[x._p] };
+for (const p of Object.values(P)) p.crm_etapas = [etapa(p.id, Object.values(X).filter(x => x._p === p.id && !x._consulta))];
+P.p1.crm_etapas.push({ id: 'eguia', ordem: 2, titulo: 'Guia', orientacao: null, consulta: true, crm_entregas: [X.k1] });
+for (const x of Object.values(X)) x.crm_etapas = { projeto_id: x._p, consulta: !!x._consulta, crm_projetos: P[x._p] };
 
 const T = {
   crm_clientes: [{ id: U(101), nome: 'Paulo Mendes', empresa: 'Imobiliária Horizonte', estrategia: '## Posicionamento\nAlto padrão' }, { id: U(102), nome: 'Clara Dias', empresa: 'Clínica Dias' }],
@@ -97,6 +99,10 @@ ok(!corpo.includes('caminho') && r.j.projetos[0].etapas[0].entregas[0].anexos[0]
 ok(r.j.projetos[0].etapas[0].orientacao === 'Oi, Paulo! Bem-vinda, Imobiliária Horizonte.', 'orientação com {{contato}} e {{empresa}} preenchidos');
 ok(r.j.cliente.estrategia.startsWith('## Posicionamento') && !corpo.includes('Clínica'), 'estratégia dele e nada do outro cliente');
 ok(T.crm_portal.find(a => a.user_id === 'u1').ultimo_acesso, 'grava o último acesso');
+const guia = r.j.projetos[0].etapas[1];
+ok(guia.consulta === true && r.j.projetos[0].etapas[0].consulta === false && guia.entregas[0].texto === 'Como postar', 'etapa só consulta vem marcada e com o texto');
+let rc = await chamar('u1', { acao: 'aprovar', entrega_id: X.k1.id }); ok(rc.s === 409 && X.k1.status === 'enviado', 'cartão só consulta não é aprovado');
+rc = await chamar('u1', { acao: 'alterar', entrega_id: X.k1.id, comentario: 'mudar' }); ok(rc.s === 409, 'nem recebe pedido de alteração');
 
 // aprovar / alterar
 r = await chamar('u1', { acao: 'aprovar', entrega_id: X.y1.id }); ok(r.s === 404 && X.y1.status === 'enviado', 'não aprova entrega de outro cliente');

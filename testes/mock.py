@@ -84,7 +84,7 @@ js = """// SÓ PARA TESTE VISUAL: finge o Supabase com dados de exemplo
 export const SUPABASE_URL = 'http://mock';
 const D = %s, EV = %s;
 window.__log = []; window.__D = D; const chain = t => { const st = { eq: {}, um: false }; const c = new Proxy({}, { get: (o, k) => { if (k === 'then') { let d = D[t] || []; if (st.um) d = d.find(r => r.id === st.eq.id) ?? null; const p = Promise.resolve({ data: d, error: null }); return p.then.bind(p); } return (...a) => { window.__log.push([t, k, a]); if (k === 'eq') st.eq[a[0]] = a[1]; if (k === 'maybeSingle' || k === 'single') st.um = true; return c; }; } }); return c; };
-export const sb = { from: chain, rpc: n => Promise.resolve({ data: n === 'is_admin' ? true : 'pr1', error: null }),
+export const sb = { from: chain, rpc: (n, a) => { window.__log.push(['rpc', n, [a]]); return Promise.resolve({ data: n === 'is_admin' ? true : 'pr1', error: null }); },
   auth: { getSession: async () => ({ data: { session: { access_token: 'x' } } }), signOut: async () => {}, refreshSession: async () => ({}), mfa: { getAuthenticatorAssuranceLevel: async () => ({ data: { currentLevel: 'aal1', nextLevel: 'aal1' } }), listFactors: async () => ({ data: { totp: [], all: [] } }), enroll: async () => ({ data: { id: 'f1', totp: { qr_code: '', secret: 'ABCD1234' } } }), challengeAndVerify: async () => ({}), unenroll: async () => ({}) } },
   storage: { from: () => ({ createSignedUrl: async () => ({ data: { signedUrl: '#' } }), upload: async () => ({}), remove: async () => ({}) }) } };
 const f0 = window.fetch; window.__ev = []; window.__EV = EV;

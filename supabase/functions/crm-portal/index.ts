@@ -4,7 +4,7 @@
 // Cliente: {acao:'dados'} | {acao:'aprovar', entrega_id} | {acao:'alterar', entrega_id, comentario} | {acao:'pedir', titulo, descricao}
 // CRM (admin, com MFA quando ativado): {acao:'convidar', cliente_id, email} | {acao:'nova_senha', user_id} | {acao:'remover', user_id}
 // O cliente só vê texto, link e arquivos de uma entrega depois que a Sabrina a envia (status enviado, revisao ou aprovado):
-// rascunho em produção não sai daqui. Projeto arquivado também não.
+// rascunho em produção não sai daqui. Projeto arquivado também não. Etapa "só consulta" (crm_etapas.consulta): o cliente lê, não aprova.
 // Deploy com verify_jwt = false (o OPTIONS do navegador chega sem login; o login é conferido aqui).
 import { createClient } from 'jsr:@supabase/supabase-js@2';
 
@@ -52,7 +52,7 @@ function senhaProvisoria() {
 async function dados(cid: string) {
   const { data: c } = await db.from('crm_clientes').select('nome,empresa,estrategia').eq('id', cid).maybeSingle();
   const { data: ps } = await db.from('crm_projetos')
-    .select('id,nome,status,inicio,entrega_prevista,crm_etapas(id,ordem,titulo,orientacao,crm_entregas(id,ordem,titulo,texto,status,prazo,link,formato,aprovado_em,atualizado_em,crm_anexos(nome,caminho,tamanho,criado_em)))')
+    .select('id,nome,status,inicio,entrega_prevista,crm_etapas(id,ordem,titulo,orientacao,consulta,crm_entregas(id,ordem,titulo,texto,status,prazo,link,formato,aprovado_em,atualizado_em,crm_anexos(nome,caminho,tamanho,criado_em)))')
     .eq('cliente_id', cid).neq('status', 'arquivado').order('criado_em', { ascending: false });
   const caminhos: string[] = [];
   for (const p of ps ?? []) for (const e of p.crm_etapas) for (const x of e.crm_entregas) if (ENTREGUE.includes(x.status)) caminhos.push(...x.crm_anexos.map((a: any) => a.caminho));
@@ -64,7 +64,7 @@ async function dados(cid: string) {
   const projetos = (ps ?? []).map((p: any) => ({
     id: p.id, nome: p.nome, status: p.status, inicio: p.inicio, entrega_prevista: p.entrega_prevista,
     etapas: p.crm_etapas.sort((a: any, b: any) => a.ordem - b.ordem).map((e: any) => ({
-      titulo: e.titulo, orientacao: preencher(e.orientacao, c),
+      titulo: e.titulo, orientacao: preencher(e.orientacao, c), consulta: !!e.consulta,
       entregas: e.crm_entregas.sort((a: any, b: any) => a.ordem - b.ordem).map((x: any) => {
         const base = { id: x.id, titulo: x.titulo, status: x.status, prazo: x.prazo, formato: x.formato };
         return ENTREGUE.includes(x.status) ? { ...base, texto: x.texto, link: x.link, aprovado_em: x.aprovado_em, atualizado_em: x.atualizado_em,
@@ -80,9 +80,9 @@ async function dados(cid: string) {
 // a entrega é de um projeto (não arquivado) deste cliente?
 async function minhaEntrega(cid: string, id: unknown) {
   if (!UUID.test(String(id))) return null;
-  const { data: x } = await db.from('crm_entregas').select('id,titulo,status,crm_etapas(projeto_id,crm_projetos(id,nome,status,cliente_id))').eq('id', id).maybeSingle();
+  const { data: x } = await db.from('crm_entregas').select('id,titulo,status,crm_etapas(projeto_id,consulta,crm_projetos(id,nome,status,cliente_id))').eq('id', id).maybeSingle();
   const p = x?.crm_etapas?.crm_projetos;
-  return p && p.cliente_id === cid && p.status !== 'arquivado' ? { ...x, projeto: p } : null;
+  return p && p.cliente_id === cid && p.status !== 'arquivado' ? { ...x, projeto: p, consulta: !!x.crm_etapas.consulta } : null;
 }
 
 async function historico(cid: string, resumo: string) {
@@ -92,6 +92,7 @@ async function historico(cid: string, resumo: string) {
 async function agirNaEntrega(cid: string, nome: string, b: Record<string, unknown>): Promise<[unknown, number]> {
   const x = await minhaEntrega(cid, b.entrega_id);
   if (!x) return [{ erro: 'Entrega não encontrada.' }, 404];
+  if (x.consulta) return [{ erro: 'Este cartão é só para consulta.' }, 409];
   if (x.status !== 'enviado') return [{ erro: 'Esta entrega não está aguardando a sua aprovação.' }, 409];
   const agora = new Date().toISOString();
   if (b.acao === 'aprovar') {
