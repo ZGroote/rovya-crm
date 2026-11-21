@@ -1,6 +1,6 @@
 import { sb, $, main, esc, brl, diaLocal, hoje, dataBR, venceu, toast, q, rotulo, preencher, mdHtml, mdTexto, formulario, confirma, listaClientes, opcoesClientes, funcao, avisoNotificacoes, baixarCsv, semRede, sessaoSalva, registrarFalha, anexosGrandes, LIMITE_ANEXO_MB, salvar, comPendentes, campos, lerEscritas, limparEscritas, enviarEscritas, mesesAtras } from './util.js';
 import { producao, STATUS_ENT, FORMATOS, seloPeca } from './producao.js';
-import { servicos, propostas, proposta, novaProposta, propostasDoCliente } from './comercial.js';
+import { servicos, servico, propostas, proposta, novaProposta, propostasDoCliente } from './comercial.js';
 import { contratos, contrato, novoContrato, alertasContratos, contratosDoCliente } from './contratos.js';
 import { documentos, cartaoDrive, ligarCartaoDrive } from './drive.js';
 import { financeiro, abaFinanceiro } from './financeiro.js';
@@ -50,13 +50,13 @@ addEventListener('error', e => { // erro de outro endereço (extensão do navega
 addEventListener('unhandledrejection', e => registrarErro(e.reason?.message || e.reason));
 
 /* ---------- roteador ---------- */
-const rotas = { '': inicio, funil, clientes, cliente, projetos, projeto, producao: () => producao(abrirEntrega), financeiro, agenda, modelos, assistente, servicos, propostas, proposta, contratos, contrato, documentos, tarefas, configuracoes, relatorios, links, horarios };
+const rotas = { '': inicio, funil, clientes, cliente, projetos, projeto, producao: () => producao(abrirEntrega), financeiro, agenda, modelos, assistente, servicos, servico, propostas, proposta, contratos, contrato, documentos, tarefas, configuracoes, relatorios, links, horarios };
 let navegacao = 0;   // cada troca de tela ganha um número: tela antiga que termina depois não mexe na nova
 async function rotear() {
   const vez = ++navegacao;
   const [r, id] = location.hash.replace(/^#\/?/, '').split('/');
   const fn = rotas[r] || inicio;
-  document.querySelectorAll('#nav a').forEach(a => a.classList.toggle('on', a.dataset.r === (r || 'inicio') || (a.dataset.r + 's') === r || (r === 'cliente' && a.dataset.r === 'clientes') || (r === 'projeto' && a.dataset.r === 'projetos') || (r === 'proposta' && a.dataset.r === 'propostas') || (r === 'contrato' && a.dataset.r === 'contratos') || (r === 'horarios' && a.dataset.r === 'agenda')));
+  document.querySelectorAll('#nav a').forEach(a => a.classList.toggle('on', a.dataset.r === (r || 'inicio') || (a.dataset.r + 's') === r || (r === 'cliente' && a.dataset.r === 'clientes') || (r === 'projeto' && a.dataset.r === 'projetos') || (r === 'proposta' && a.dataset.r === 'propostas') || (r === 'contrato' && a.dataset.r === 'contratos') || (r === 'horarios' && a.dataset.r === 'agenda') || (r === 'servico' && a.dataset.r === 'servicos')));
   main.innerHTML = '<p class="vazio">Carregando…</p>';
   try { await fn(id); } catch (e) {
     if (vez !== navegacao) return;   // ela já foi para outra tela antes desta terminar de carregar: o erro não é da tela atual

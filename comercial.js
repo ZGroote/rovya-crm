@@ -1,5 +1,5 @@
 // comercial: catálogo de serviços e propostas versionadas (tabelas crm_servicos e crm_propostas)
-import { sb, $, main, esc, brl, hoje, diaLocal, dataBR, venceu, toast, q, rotulo, preencher, mdHtml, formulario, confirma, listaClientes, opcoesClientes } from './util.js';
+import { sb, $, main, esc, brl, hoje, diaLocal, dataBR, venceu, toast, q, rotulo, preencher, mdHtml, formulario, confirma, listaClientes, opcoesClientes, anexosGrandes } from './util.js';
 import { novoContrato } from './contratos.js';
 import { enviarAoDrive, pastaDoCliente, linhaDoc } from './drive.js';
 
@@ -26,26 +26,126 @@ const CAMPOS_SERVICO = [
   { k: 'escopo', l: 'Escopo', t: 'textarea', linhas: 5 }, { k: 'entregaveis', l: 'Entregáveis (um por linha)', t: 'textarea', linhas: 5 },
   { k: 'preco', l: 'Preço base (R$)', t: 'number', meia: true }, { k: 'ativo', l: 'Ativo', t: 'select', o: [['true', 'Sim'], ['false', 'Não']], padrao: 'true', meia: true }];
 
+// devolve 'apagado', o id salvo, ou null (cancelou)
 async function editarServico(s) {
   const v = await formulario(s ? s.nome : 'Novo serviço', CAMPOS_SERVICO, s || {}, s ? BT_APAGAR('Apagar serviço') : '');
-  if ($('#dlg').returnValue === 'apagar') { if (await confirma(`Apagar “${s.nome}” do catálogo? Propostas já feitas não mudam.`)) await q(sb.from('crm_servicos').delete().eq('id', s.id)); return; }
-  if (!v) return;
+  if ($('#dlg').returnValue === 'apagar') {
+    if (!await confirma(`Apagar “${s.nome}” do catálogo, com os planos e documentos? Propostas já feitas não mudam.`)) return null;
+    await q(sb.from('crm_servicos').delete().eq('id', s.id));
+    if (s.arquivos?.length) await sb.storage.from('crm-anexos').remove(s.arquivos.map(a => a.caminho));
+    return 'apagado';
+  }
+  if (!v) return null;
   v.ativo = v.ativo !== 'false'; if (v.preco != null) v.preco = r2(v.preco);
-  await q(s ? sb.from('crm_servicos').update(v).eq('id', s.id) : sb.from('crm_servicos').insert(v)); toast('Serviço salvo');
+  const [r] = await q(s ? sb.from('crm_servicos').update(v).eq('id', s.id).select('id') : sb.from('crm_servicos').insert(v).select('id')); toast('Serviço salvo');
+  return r?.id ?? s?.id;
 }
+
+// planos: [{nome, preco, a_partir, itens, documento}]
+const precoPlano = pl => pl.preco == null ? '—' : (pl.a_partir ? 'A partir de ' : '') + brl(pl.preco);
+const itensDe = pl => String(pl.itens || '').split('\n').map(x => x.replace(/^\s*[-•*]\s*/, '').trim()).filter(Boolean);
 
 export async function servicos() {
   const ss = await q(sb.from('crm_servicos').select('*').order('categoria', { nullsFirst: false }).order('nome'));
-  const tabela = l => `<table><thead><tr><th>Código</th><th>Serviço</th><th class="esconde-cel">Categoria</th><th class="dir">Preço base</th><th>Situação</th></tr></thead><tbody>${l.map(s => `<tr data-id="${s.id}" style="cursor:pointer">
+  const tabela = l => `<table><thead><tr><th>Código</th><th>Serviço</th><th class="esconde-cel">Categoria</th><th class="dir">Preço</th><th>Situação</th></tr></thead><tbody>${l.map(s => `<tr data-id="${s.id}" style="cursor:pointer">
     <td><small class="mute">${esc(s.codigo)}</small></td><td><b>${esc(s.nome)}</b>${s.descricao ? `<br><small class="mute">${esc(s.descricao)}</small>` : ''}</td>
-    <td class="esconde-cel">${esc(s.categoria)}</td><td class="dir">${s.preco != null ? brl(s.preco) : '—'}</td><td>${s.ativo ? '<span class="pill p-aprovado">Ativo</span>' : '<span class="pill">Inativo</span>'}</td></tr>`).join('')}</tbody></table>`;
+    <td class="esconde-cel">${esc(s.categoria)}</td><td class="dir">${s.planos?.length ? `<small class="mute">${s.planos.length} plano${s.planos.length > 1 ? 's' : ''}</small>` : s.preco != null ? brl(s.preco) : '—'}</td><td>${s.ativo ? '<span class="pill p-aprovado">Ativo</span>' : '<span class="pill">Inativo</span>'}</td></tr>
+    ${(s.planos || []).map(pl => `<tr data-id="${s.id}" style="cursor:pointer"><td></td><td style="padding-left:22px">${esc(pl.nome)}</td><td class="esconde-cel"></td><td class="dir">${precoPlano(pl)}</td><td></td></tr>`).join('')}`).join('')}</tbody></table>`;
   const ativos = ss.filter(s => s.ativo), inativos = ss.filter(s => !s.ativo);
   main.innerHTML = `<div class="topo"><div><div class="eyebrow">Comercial</div><h1>Serviços</h1><p>O catálogo que alimenta as propostas. Mudar aqui não altera propostas já feitas.</p></div><button class="bt" id="nServ">+ Serviço</button></div>
     <div class="card">${ativos.length ? tabela(ativos) : '<p class="vazio">Nenhum serviço ativo. Cadastre os serviços que a ROVYA vende.</p>'}</div>
     ${inativos.length ? `<h2 style="margin:28px 0 12px">Inativos</h2><div class="card" style="opacity:.6">${tabela(inativos)}</div>` : ''}`;
-  const porId = Object.fromEntries(ss.map(s => [s.id, s]));
-  main.querySelectorAll('tr[data-id]').forEach(tr => tr.onclick = async () => { await editarServico(porId[tr.dataset.id]); servicos(); });
-  $('#nServ').onclick = async () => { await editarServico(); servicos(); };
+  main.querySelectorAll('tr[data-id]').forEach(tr => tr.onclick = () => location.hash = '#/servico/' + tr.dataset.id);
+  $('#nServ').onclick = async () => { const id = await editarServico(); if (id) location.hash = '#/servico/' + id + '/planos'; };
+}
+
+/* ---------- SERVIÇO: #/servico/<id>  (abas Dados · Planos · Documentos) ---------- */
+const CAMPOS_PLANO = [
+  { k: 'nome', l: 'Nome do plano (ex.: Essencial, Intermediária, Avançada)', req: true },
+  { k: 'preco', l: 'Preço (R$)', t: 'number', meia: true }, { k: 'a_partir', l: 'Mostrar como', t: 'select', o: [['', 'Preço fechado'], ['1', '“A partir de”']], meia: true },
+  { k: 'itens', l: 'O que está incluído (um por linha)', t: 'textarea', linhas: 9 }];
+const AJUDA_DOC = '<p class="mute" style="margin:0;font-size:.82rem">Dá para colar do Word. <b>## Título</b> vira título e <b>**texto**</b> vira negrito.</p>';
+
+export async function servico(id, aba) {
+  aba ||= location.hash.split('/')[3] || 'dados';
+  const s = await q(sb.from('crm_servicos').select('*').eq('id', id).maybeSingle());
+  if (!s) { main.innerHTML = '<p class="vazio">Serviço não encontrado.</p>'; return; }
+  const planos = s.planos || [], arquivos = s.arquivos || [];
+  const gravar = async v => { await q(sb.from('crm_servicos').update(v).eq('id', id)); Object.assign(s, v); };
+  const bloco = (t, v) => v ? `<div><div class="eyebrow" style="margin-bottom:4px">${t}</div><div style="white-space:pre-wrap">${esc(v)}</div></div>` : '';
+
+  const conteudo = {
+    dados: () => `<section class="card" style="display:grid;gap:16px">
+        <div class="acoes" style="justify-content:space-between"><div>${s.ativo ? '<span class="pill p-aprovado">Ativo</span>' : '<span class="pill">Inativo</span>'} <small class="mute">${esc([s.codigo, s.categoria].filter(Boolean).join(' · '))}</small></div><button class="bt peq sec" id="edDados">Editar dados</button></div>
+        ${bloco('Descrição curta (vai para a proposta)', s.descricao)}${bloco('Escopo', s.escopo)}${bloco('Entregáveis', s.entregaveis)}
+        ${planos.length ? '' : bloco('Preço base', s.preco != null ? brl(s.preco) : '')}</section>`,
+    planos: () => `<div class="acoes" style="margin-bottom:14px"><button class="bt" id="nPlano">+ Plano</button><small class="mute">Clique num plano para editar. Na proposta, “+ Do catálogo” oferece cada plano com o preço e o que está incluído.</small></div>
+      ${planos.length ? `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:14px">${planos.map((pl, i) => `<section class="card" data-p="${i}" style="cursor:pointer;display:grid;gap:8px;align-content:start">
+        <h3 style="margin:0">${esc(pl.nome)}</h3><b style="color:var(--wine);font-size:1.15rem">${precoPlano(pl)}</b>
+        ${itensDe(pl).length ? `<ul style="margin:0;padding-left:18px;display:grid;gap:3px">${itensDe(pl).map(x => `<li>${esc(x)}</li>`).join('')}</ul>` : '<small class="mute">Sem itens ainda.</small>'}
+        ${pl.documento ? '<small class="mute">📄 tem documento</small>' : ''}</section>`).join('')}</div>`
+      : '<p class="card vazio">Nenhum plano ainda. Crie, por exemplo, Essencial, Intermediária e Avançada, cada um com o preço e o que está incluído.</p>'}`,
+    documentos: () => `${planos.length ? planos.map((pl, i) => `<section class="card" style="margin-bottom:14px">
+        <div class="topo" style="margin-bottom:6px;align-items:center"><h3 style="margin:0">${esc(s.nome)} — ${esc(pl.nome)}</h3>
+          <div class="acoes"><button class="bt peq sec" data-doc="${i}">${pl.documento ? 'Editar' : 'Escrever documento'}</button>${pl.documento ? `<button class="bt peq fantasma" data-pdf="${i}">Gerar PDF</button>` : ''}</div></div>
+        ${pl.documento ? `<div class="ori"><div class="txt" style="max-height:none">${mdHtml(pl.documento)}</div></div>` : '<p class="mute" style="margin:0">Sem documento. Escreva aqui como funciona o plano (rotina mensal, semanas, reuniões…).</p>'}</section>`).join('')
+      : '<p class="card vazio">Os documentos ficam em cada plano. Crie os planos primeiro, na aba Planos.</p>'}
+      <section class="card"><div class="topo" style="margin-bottom:6px;align-items:center"><h3 style="margin:0">Arquivos</h3><label class="bt peq sec" style="cursor:pointer">+ Anexar arquivo<input type="file" id="arqServ" multiple hidden></label></div>
+        <ul class="lista">${arquivos.map((a, i) => `<li><a href="#" data-abrir="${i}">📎 ${esc(a.nome)}</a> <small class="mute">${Math.max(1, Math.round(a.tamanho / 1024))} KB</small> <button class="bt peq fantasma" data-tirar="${i}" style="color:var(--bad)">Remover</button></li>`).join('') || '<li class="vazio">Nenhum arquivo. Anexe Word, PDF, apresentações…</li>'}</ul></section>`
+  };
+
+  main.innerHTML = `<div class="topo"><div><div class="eyebrow"><a href="#/servicos">Serviços</a></div><h1>${esc(s.nome)}</h1>${s.descricao ? `<p>${esc(s.descricao)}</p>` : ''}</div></div>
+    <div class="tabs"><button data-a="dados">Dados</button><button data-a="planos">Planos${planos.length ? ' · ' + planos.length : ''}</button><button data-a="documentos">Documentos</button></div>
+    <div id="aba">${(conteudo[aba] || conteudo.dados)()}</div>`;
+  main.querySelectorAll('.tabs button').forEach(b => { b.classList.toggle('on', b.dataset.a === aba); b.onclick = () => servico(id, b.dataset.a); });
+  const de = sel => main.querySelectorAll(sel);
+
+  if (aba === 'dados') $('#edDados').onclick = async () => { const r = await editarServico(s); if (r === 'apagado') location.hash = '#/servicos'; else if (r) servico(id, aba); };
+
+  const editarPlano = async i => {
+    const pl = planos[i] || {};
+    const v = await formulario(i < 0 ? 'Novo plano' : pl.nome, CAMPOS_PLANO, { ...pl, a_partir: pl.a_partir ? '1' : '' }, i < 0 ? '' : BT_APAGAR('Apagar plano'));
+    if ($('#dlg').returnValue === 'apagar') { if (!await confirma(`Apagar o plano “${pl.nome}”${pl.documento ? ' e o documento dele' : ''}?`)) return; planos.splice(i, 1); }
+    else if (!v) return;
+    else { const novo = { ...pl, nome: v.nome, preco: v.preco == null ? null : r2(v.preco), a_partir: !!v.a_partir, itens: v.itens || '' }; i < 0 ? planos.push(novo) : (planos[i] = novo); }
+    await gravar({ planos }); toast('Planos salvos'); servico(id, 'planos');
+  };
+  if (aba === 'planos') {
+    $('#nPlano').onclick = () => editarPlano(-1);
+    de('[data-p]').forEach(c => c.onclick = () => editarPlano(+c.dataset.p));
+  }
+
+  if (aba === 'documentos') {
+    de('[data-doc]').forEach(b => b.onclick = async () => {
+      const pl = planos[b.dataset.doc];
+      const v = await formulario(`Documento · ${pl.nome}`, [{ k: 'documento', l: 'Texto', t: 'textarea', linhas: 18 }], pl, AJUDA_DOC);
+      if (!v) return;
+      pl.documento = v.documento || ''; await gravar({ planos }); toast('Documento salvo'); servico(id, 'documentos');
+    });
+    de('[data-pdf]').forEach(b => b.onclick = () => imprimirPlano(s, planos[b.dataset.pdf]));
+    $('#arqServ').onchange = async e => {
+      const fs = [...e.target.files]; e.target.value = '';
+      if (!fs.length || anexosGrandes(fs)) return;
+      for (const f of fs) {
+        const caminho = `servicos/${id}/${Date.now()}-${f.name.normalize('NFD').replace(/[^\w.-]+/g, '_')}`;
+        toast('Enviando ' + f.name + '…');
+        await q(sb.storage.from('crm-anexos').upload(caminho, f));
+        arquivos.push({ nome: f.name, caminho, tamanho: f.size });
+      }
+      await gravar({ arquivos }); toast(fs.length > 1 ? 'Arquivos anexados' : 'Arquivo anexado'); servico(id, 'documentos');
+    };
+    de('[data-abrir]').forEach(a => a.onclick = async e => {
+      e.preventDefault();
+      const { data } = await sb.storage.from('crm-anexos').createSignedUrl(arquivos[a.dataset.abrir].caminho, 3600);
+      if (data?.signedUrl) open(data.signedUrl, '_blank', 'noopener'); else toast('Não consegui abrir o arquivo', true);
+    });
+    de('[data-tirar]').forEach(b => b.onclick = async () => {
+      const a = arquivos[b.dataset.tirar];
+      if (!await confirma(`Remover “${a.nome}”?`)) return;
+      arquivos.splice(b.dataset.tirar, 1); await gravar({ arquivos });
+      await sb.storage.from('crm-anexos').remove([a.caminho]); toast('Arquivo removido'); servico(id, 'documentos');
+    });
+  }
 }
 
 /* ---------- PROPOSTAS ---------- */
@@ -89,7 +189,7 @@ export async function proposta(id) {
   if (!p) { main.innerHTML = '<p class="vazio">Proposta não encontrada.</p>'; return; }
   const [vers, servs] = await Promise.all([
     q(sb.from('crm_propostas').select('id,versao').eq('grupo', p.grupo).order('versao')),
-    q(sb.from('crm_servicos').select('id,codigo,nome,descricao,preco').eq('ativo', true).order('nome'))]);
+    q(sb.from('crm_servicos').select('id,codigo,nome,descricao,preco,planos').eq('ativo', true).order('nome'))]);
   // PDFs no Drive de todas as versões do grupo (linhaDoc mostra a versão)
   const docs = await q(sb.from('crm_documentos').select('*').in('proposta_id', vers.map(v => v.id)).order('criado_em', { ascending: false }));
   const c = p.crm_clientes, ult = vers.at(-1), ro = p.versao < ult.versao; // versões antigas = histórico, só leitura
@@ -146,11 +246,19 @@ export async function proposta(id) {
     $('#itens').onclick = e => { const tr = e.target.closest('tr[data-i]'); if (tr) item(itens[tr.dataset.i], +tr.dataset.i); };
     $('#doCat').onclick = async () => {
       if (!servs.length) { toast('Nenhum serviço ativo no catálogo'); return; }
-      const v = await formulario('Adicionar do catálogo', [{ k: 's', l: 'Serviço', t: 'select', o: servs.map(s => [s.id, (s.codigo ? s.codigo + ' · ' : '') + s.nome + (s.preco != null ? ' · ' + brl(s.preco) : '')]) },
-        { k: 'qtd', l: 'Quantidade', t: 'number', req: true }], { qtd: 1 });
+      // serviço com planos: uma opção por plano ("id|índice"); sem planos: o serviço com o preço base
+      const ops = servs.flatMap(s => { const cod = s.codigo ? s.codigo + ' · ' : '';
+        return s.planos?.length ? s.planos.map((pl, i) => [s.id + '|' + i, `${cod}${s.nome} · ${pl.nome} · ${precoPlano(pl)}`]) : [[s.id, cod + s.nome + (s.preco != null ? ' · ' + brl(s.preco) : '')]]; });
+      const v = await formulario('Adicionar do catálogo', [{ k: 's', l: 'Serviço', t: 'select', o: ops }, { k: 'qtd', l: 'Quantidade', t: 'number', req: true }], { qtd: 1 },
+        '<label style="display:flex;gap:8px;align-items:center;text-transform:none;letter-spacing:0"><input type="checkbox" id="comDoc" checked> Colocar o documento do plano no texto da proposta (se tiver)</label>');
       if (!v) return;
-      const s = servs.find(x => x.id === v.s); // copia: o item não acompanha mudanças futuras do catálogo
-      itens.push({ servico_id: s.id, nome: s.nome, descricao: s.descricao || '', qtd: Number(v.qtd) || 0, preco: r2(s.preco) });
+      const [sid, pi] = v.s.split('|'), s = servs.find(x => x.id === sid), pl = pi != null ? s.planos[pi] : null;
+      // copia: o item não acompanha mudanças futuras do catálogo
+      itens.push(pl ? { servico_id: s.id, nome: `${s.nome} — ${pl.nome}`, descricao: itensDe(pl).map(x => '• ' + x).join('\n') || s.descricao || '', qtd: Number(v.qtd) || 0, preco: r2(pl.preco) }
+        : { servico_id: s.id, nome: s.nome, descricao: s.descricao || '', qtd: Number(v.qtd) || 0, preco: r2(s.preco) });
+      if (pl?.documento && $('#comDoc').checked) { // o diálogo continua no DOM depois de fechar
+        const f = $('#fCorpo'); f.value = (f.value.trimEnd() ? f.value.trimEnd() + '\n\n' : '') + `## ${s.nome} — ${pl.nome}\n${pl.documento.trim()}\n`; previa();
+      }
       await salvar(); desenha();
     };
   }
@@ -210,9 +318,23 @@ async function imprimir(p, c) {
       <tr class="total"><td colspan="3" class="dir">Total</td><td class="dir">${brl(totalDe(its, desconto))}</td></tr></tfoot></table>` : ''}
     ${p.validade ? `<p class="val">Proposta válida até ${dataLonga(p.validade)}.</p>` : ''}
     <footer>ROVYA · Branding e Comunicação</footer>`;
+  imprimirDiv(d, nomeArquivo(p, c));
+}
+async function imprimirDiv(d, nome) {
   document.body.append(d);
   await d.querySelector('img').decode().catch(() => { });
-  const titulo = document.title; document.title = nomeArquivo(p, c);
+  const titulo = document.title; document.title = nome;
   addEventListener('afterprint', () => { d.remove(); document.title = titulo; }, { once: true });
   print();
+}
+// documento do plano (aba Documentos do serviço), no mesmo papel da proposta
+function imprimirPlano(s, pl) {
+  document.getElementById('impressao')?.remove();
+  const d = document.createElement('div'); d.id = 'impressao';
+  d.innerHTML = `<header><img src="img/rosa.svg" alt=""><span><b>ROVYA</b><small>CREATIVE</small></span></header>
+    <div class="cab"><div><div class="rot">${esc(s.nome)}</div><h1>${esc(pl.nome)}</h1></div><div class="meta">${pl.preco != null ? precoPlano(pl) : ''}</div></div>
+    ${itensDe(pl).length ? `<div class="corpo">${itensDe(pl).map(x => '• ' + esc(x)).join('\n')}</div>` : ''}
+    <div class="corpo">${mdHtml(pl.documento)}</div>
+    <footer>ROVYA · Branding e Comunicação</footer>`;
+  imprimirDiv(d, `ROVYA_${(s.codigo || s.nome).normalize('NFD').replace(/[^\w-]+/g, '').toUpperCase()}_${pl.nome.normalize('NFD').replace(/[^\w-]+/g, '').toUpperCase()}_${hoje()}`);
 }
