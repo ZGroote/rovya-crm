@@ -3,6 +3,7 @@ import { producao, STATUS_ENT, FORMATOS, seloPeca } from './producao.js';
 import { servicos, servico, propostas, proposta, novaProposta, propostasDoCliente } from './comercial.js';
 import { contratos, contrato, novoContrato, alertasContratos, contratosDoCliente } from './contratos.js';
 import { documentos, cartaoDrive, ligarCartaoDrive } from './drive.js';
+import { cartaoPortal, ligarPortal } from './portal.js';
 import { financeiro, abaFinanceiro } from './financeiro.js';
 import { configuracoes } from './configuracoes.js';
 import { relatorios } from './relatorios.js';
@@ -248,9 +249,10 @@ async function cliente(id) {
       <ul class="lista">${c.onboarding.map((i, n) => `<li><label style="display:flex;gap:10px;align-items:center;cursor:pointer;flex:1${i.feito ? ';color:var(--mute);text-decoration:line-through' : ''}"><input type="checkbox" data-onb="${n}" ${i.feito ? 'checked' : ''}> ${esc(i.item)}</label></li>`).join('')}</ul>
       <button class="bt peq fantasma" id="onbItem">+ Item</button>`
       : `<p class="mute">Checklist de entrada do cliente: contrato, pasta, briefing, acessos, kickoff…</p><button class="bt peq sec" id="onbIni">Iniciar onboarding</button>`}</section>
-    ${await propostasDoCliente(id)}${await contratosDoCliente(id)}${await cartaoDrive(c)}
+    ${await propostasDoCliente(id)}${await contratosDoCliente(id)}${await cartaoDrive(c)}${await cartaoPortal(c)}
   </div>`;
   ligarCartaoDrive(c, () => cliente(id));
+  ligarPortal(c, () => cliente(id));
   $('#nHist').onclick = async () => { if (await registrarContato(id)) cliente(id); };
   main.querySelectorAll('[data-hist]').forEach(li => li.onclick = async () => { if (await registrarContato(id, null, c.crm_interacoes.find(x => x.id === li.dataset.hist))) cliente(id); });
   const salvarOnb = async lista => { await q(sb.from('crm_clientes').update({ onboarding: lista }).eq('id', id)); cliente(id); };
