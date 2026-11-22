@@ -4,8 +4,9 @@
 --   Recusar à mão  → proposta recusada + oportunidade Perdido, com o motivo (obrigatório) no cartão do funil.
 --   Oportunidade já encerrada de outro jeito (aprovar com o cartão em Perdido, recusar com o cartão em Fechado):
 --                    recusa a operação inteira com uma mensagem clara; nada é sobrescrito.
---   Reabrir        → aprovada sem aceite online volta a enviada; recusada volta a enviada. SÓ a proposta muda: o funil fica
---                    como está (regra definitiva ainda em decisão) e o histórico registra a reabertura. Contrato e histórico ficam.
+--   Reabrir        → aprovada sem aceite online volta a enviada; recusada volta a enviada. SÓ a proposta muda: reabrir uma
+--                    proposta NÃO reabre a oportunidade encerrada (decisão comercial de 22/11/2026, PR #2); a Sabrina revisa o
+--                    cartão no Funil. O histórico registra a reabertura; contrato e histórico ficam.
 --   Aceite online com o cartão em Perdido: o aceite do cliente vale, o cartão não é sobrescrito e o histórico/aviso dizem isso.
 -- O status da proposta passa a mudar só por crm_proposta_decidir ou pelo aceite online (o gatilho recusa mudança direta).
 -- Só acrescenta/troca funções: nenhuma linha muda.
