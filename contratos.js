@@ -2,9 +2,13 @@
 import { sb, $, main, esc, brl, hoje, diaLocal, dataBR, toast, q, rotulo, formulario, confirma, listaClientes, opcoesClientes, anexosGrandes } from './util.js';
 import { enviarAoDrive, pastaDoCliente, linhaDoc } from './drive.js';
 import { lancarMensalidades } from './financeiro.js';
+import { criarMesDoContrato, rotuloMes } from './conteudo.js';
 
 const TIPOS = [['recorrente', 'Recorrente'], ['avulso', 'Avulso'], ['misto', 'Misto']];
 const STATUS = [['vigente', 'Vigente'], ['assinatura', 'Aguardando assinatura'], ['rascunho', 'Rascunho'], ['encerrado', 'Encerrado'], ['cancelado', 'Cancelado']];
+// passagens de status permitidas (o banco confere a mesma regra: crm_contrato_trg em 024_fluxo.sql)
+export const PROXIMOS = { rascunho: ['assinatura', 'vigente', 'cancelado'], assinatura: ['rascunho', 'vigente', 'cancelado'], vigente: ['encerrado', 'cancelado'], encerrado: ['vigente'], cancelado: [] };
+const opcoesStatus = atual => STATUS.filter(([k]) => k === atual || PROXIMOS[atual]?.includes(k));
 const COR = { vigente: 'p-aprovado', assinatura: 'p-produzindo', rascunho: 'p-a_fazer', cancelado: 'p-revisao' };
 const pillStatus = s => `<span class="pill ${COR[s] || ''}">${esc(rotulo(STATUS, s))}</span>`;
 const pillTipo = t => `<span class="pill p-enviado">${esc(rotulo(TIPOS, t))}</span>`;
@@ -27,14 +31,15 @@ function avisos(c) {
 }
 
 /* ---------- formulário ---------- */
-const campos = cs => [
+const campos = (cs, atual) => [
   { k: 'cliente_id', l: 'Cliente', t: 'select', o: [['', 'Selecione…'], ...opcoesClientes(cs)], req: true },
   { k: 'titulo', l: 'Título do contrato', req: true },
-  { k: 'tipo', l: 'Tipo', t: 'select', o: TIPOS, meia: true }, { k: 'status', l: 'Status', t: 'select', o: STATUS, meia: true },
+  { k: 'tipo', l: 'Tipo', t: 'select', o: TIPOS, meia: true }, { k: 'status', l: 'Status', t: 'select', o: atual ? opcoesStatus(atual) : STATUS, meia: true },
   { k: 'inicio', l: 'Início', t: 'date', meia: true }, { k: 'fim', l: 'Fim', t: 'date', meia: true },
   { k: 'valor_mensal', l: 'Valor mensal (R$)', t: 'number', meia: true }, { k: 'valor_avulso', l: 'Valor avulso (R$)', t: 'number', meia: true },
   { k: 'renovacao_auto', l: 'Renovação automática', t: 'select', o: [['false', 'Não'], ['true', 'Sim']], meia: true },
   { k: 'aviso_dias', l: 'Avisar quantos dias antes do fim', t: 'number', meia: true },
+  { k: 'posts_mes', l: 'Escopo: posts por mês', t: 'number', meia: true }, { k: 'ajustes_inclusos', l: 'Rodadas de ajuste incluídas por peça', t: 'number', meia: true },
   { k: 'link_assinado', l: 'Link da assinatura (D4Sign, gov.br…)' },
   { k: 'notas', l: 'Notas', t: 'textarea', linhas: 3 }];
 
@@ -47,19 +52,48 @@ function valida(v) {
 }
 
 // abre o formulário até os dados estarem válidos; null = cancelou (ou botão extra, ver returnValue)
-async function pedir(titulo, val, extra = '') {
+async function pedir(titulo, val, extra = '', atual = null) {
   const cs = await listaClientes();
   if (!cs.length) { toast('Cadastre um cliente primeiro', true); return null; }
   for (let erro = null; ;) {
-    const v = await formulario(titulo, campos(cs), val, (erro ? `<p class="atrasado">${esc(erro)}</p>` : '') + extra);
+    const v = await formulario(titulo, campos(cs, atual), val, (erro ? `<p class="atrasado">${esc(erro)}</p>` : '') + extra);
     if (!v) return null;
     v.renovacao_auto = v.renovacao_auto === 'true';
     v.aviso_dias = Math.max(0, Math.round(v.aviso_dias ?? 30));
+    v.posts_mes = v.posts_mes ? Math.max(1, Math.round(v.posts_mes)) : null; // colunas inteiras
+    v.ajustes_inclusos = v.ajustes_inclusos == null ? null : Math.round(v.ajustes_inclusos);
     if (v.tipo === 'avulso') v.valor_mensal = null; // guarda só o valor que vale para o tipo
     if (v.tipo === 'recorrente') v.valor_avulso = null;
     erro = valida(v); if (!erro) return v;
     val = v;
   }
+}
+
+/* ---------- escopo: quanto do contratado já foi usado em cada mês ---------- */
+const mensal = c => c.tipo !== 'avulso' && !!c.posts_mes; // contrato que vira um projeto por mês
+export const mesAtual = () => hoje().slice(0, 7);
+export const mesSeguinte = (m = mesAtual()) => { const [a, n] = m.split('-').map(Number); return n === 12 ? `${a + 1}-01` : `${a}-${String(n + 1).padStart(2, '0')}`; };
+// posts = peças das etapas que o cliente aprova (as "só consulta" não contam); além = ajustes acima do incluído, somados por peça
+export function usoEscopo(c, projeto) {
+  const ps = projeto.crm_etapas.filter(e => !e.consulta).flatMap(e => e.crm_entregas);
+  return { posts: ps.length, aprovados: ps.filter(x => x.status === 'aprovado').length, previstos: c.posts_mes,
+    alem: c.ajustes_inclusos == null ? 0 : ps.reduce((s, x) => s + Math.max(0, (x.revisoes || 0) - c.ajustes_inclusos), 0) };
+}
+export const textoUso = u => [u.previstos ? `${u.posts} de ${u.previstos} posts` : `${u.posts} posts`, `${u.aprovados} aprovados`, u.alem ? `${u.alem} ajuste${u.alem > 1 ? 's' : ''} além do combinado` : ''].filter(Boolean).join(' · ');
+// meses que já deviam existir: o atual (depois do início) e, a partir do dia 20, o seguinte (até o fim do contrato)
+export function mesesQueFaltam(c, feitos) {
+  if (c.status !== 'vigente' || !mensal(c)) return [];
+  const ms = [mesAtual(), ...(+hoje().slice(8) >= 20 ? [mesSeguinte()] : [])];
+  return ms.filter(m => !feitos.includes(m) && (!c.inicio || c.inicio.slice(0, 7) <= m) && (!c.fim || c.fim.slice(0, 7) >= m));
+}
+async function cartaoEscopo(c) {
+  const ps = await q(sb.from('crm_projetos').select('id,nome,mes,status,crm_etapas(consulta,crm_entregas(status,revisoes))').eq('contrato_id', c.id).order('mes', { ascending: false }));
+  const meses = ps.filter(p => p.mes), faltam = mesesQueFaltam(c, meses.map(p => p.mes));
+  return `<section class="card" style="margin-top:18px"><h3>Escopo</h3>
+    <p class="mute" style="margin:0 0 10px">${[c.posts_mes ? `${c.posts_mes} posts por mês` : '', c.ajustes_inclusos != null ? `${c.ajustes_inclusos} rodada(s) de ajuste por peça` : ''].filter(Boolean).join(' · ')}</p>
+    <ul class="lista">${meses.map(p => { const u = usoEscopo(c, p); return `<li><a class="cresce" href="#/projeto/${esc(p.id)}"><b>${esc(rotuloMes(p.mes))}</b><small>${textoUso(u)}</small></a>${u.alem || (u.previstos && u.posts > u.previstos) ? '<span class="pill p-revisao">acima do contrato</span>' : ''}</li>`; }).join('')
+      || '<li class="vazio">Nenhum mês criado ainda.</li>'}</ul>
+    ${faltam.map(m => `<button class="bt peq sec" data-criar-mes="${m}">Criar ${esc(rotuloMes(m))}</button>`).join(' ')}</section>`;
 }
 
 /* ---------- lista: #/contratos ---------- */
@@ -95,8 +129,8 @@ export async function contrato(id) {
   const al = avisos(c);
   main.innerHTML = `<div class="topo"><div><div class="eyebrow"><a href="#/contratos">Contratos</a> · <a href="#/cliente/${esc(cli.id)}">${esc(nomeCli(cli))}</a></div><h1>${esc(c.titulo)}</h1>
       <p>${pillTipo(c.tipo)} ${pillStatus(c.status)}${al.map(([t, forte]) => ` · <span class="${forte ? 'atrasado' : ''}">${esc(t)}</span>`).join('')}</p></div>
-    <div class="acoes"><select id="st" class="busca" style="min-width:0">${STATUS.map(([k, l]) => `<option value="${k}" ${k === c.status ? 'selected' : ''}>${l}</option>`).join('')}</select>
-      ${proj ? '' : '<button class="bt sec" id="nProj">Criar projeto</button>'}<button class="bt sec" id="lancar">Lançar no financeiro</button><button class="bt sec" id="ed">Editar</button></div></div>
+    <div class="acoes"><select id="st" class="busca" style="min-width:0">${opcoesStatus(c.status).map(([k, l]) => `<option value="${k}" ${k === c.status ? 'selected' : ''}>${l}</option>`).join('')}</select>
+      ${proj || mensal(c) ? '' : '<button class="bt sec" id="nProj">Criar projeto</button>'}<button class="bt sec" id="lancar">Lançar no financeiro</button><button class="bt sec" id="ed">Editar</button></div></div>
   <div class="grade2">
     <section class="card"><h3>Dados</h3><ul class="lista">
       ${[['Cliente', `<a href="#/cliente/${esc(cli.id)}">${esc(nomeCli(cli))}</a>`], ['Tipo', esc(rotulo(TIPOS, c.tipo))], ['Vigência', vigencia(c)],
@@ -113,11 +147,18 @@ export async function contrato(id) {
         <label class="bt peq sec" style="cursor:pointer">${c.arquivo ? 'Substituir' : 'Anexar'}<input type="file" id="arq" hidden></label></li>
       <li><div class="cresce"><b>No Drive</b><small>${docs.length ? 'Cópias na pasta do cliente:' : 'Nenhum arquivo enviado ao Drive.'}</small></div><button class="bt peq sec" id="envDrive">Enviar ao Drive</button></li>
       ${docs.map(linhaDoc).join('')}</ul></section>
-  </div>`;
-  $('#st').onchange = async e => { await q(sb.from('crm_contratos').update({ status: e.target.value }).eq('id', id)); toast('Status atualizado'); contrato(id); };
+  </div>
+  ${mensal(c) || c.ajustes_inclusos != null ? await cartaoEscopo(c) : ''}`;
+  main.querySelectorAll('[data-criar-mes]').forEach(b => b.onclick = async () => { b.disabled = true; try { location.hash = '#/projeto/' + await criarMesDoContrato({ ...c, crm_clientes: cli }, b.dataset.criarMes); } catch { b.disabled = false; } });
+  $('#st').onchange = async e => {
+    const st = e.target.value;
+    if (['cancelado', 'encerrado'].includes(st) && !await confirma(st === 'cancelado' ? `Cancelar “${c.titulo}”? Contrato cancelado não volta a vigente.` : `Encerrar “${c.titulo}”?`)) return contrato(id);
+    try { await q(sb.from('crm_contratos').update({ status: st }).eq('id', id)); toast('Status atualizado'); } catch { }
+    contrato(id);
+  };
   $('#lancar').onclick = async () => { if (await lancarMensalidades(c)) contrato(id); };
   $('#ed').onclick = async () => {
-    const v = await pedir('Editar contrato', c, '<button class="bt fantasma" value="apagar" formnovalidate style="justify-self:start;color:var(--bad)">Apagar contrato</button>');
+    const v = await pedir('Editar contrato', c, '<button class="bt fantasma" value="apagar" formnovalidate style="justify-self:start;color:var(--bad)">Apagar contrato</button>', c.status);
     if ($('#dlg').returnValue === 'apagar') {
       if (await confirma(`Apagar o contrato “${c.titulo}”?`)) {
         await q(sb.from('crm_contratos').delete().eq('id', id));
@@ -156,7 +197,7 @@ export async function contrato(id) {
       contrato(id);
     } catch (e) { toast(e.message, true); }
   };
-  if (!proj) $('#nProj').onclick = () => dispatchEvent(new CustomEvent('crm:criar-projeto', { detail: { cliente_id: c.cliente_id, nome: c.titulo, valor: c.valor_avulso ?? c.valor_mensal, contrato_id: id } }));
+  if ($('#nProj')) $('#nProj').onclick = () => dispatchEvent(new CustomEvent('crm:criar-projeto', { detail: { cliente_id: c.cliente_id, nome: c.titulo, valor: c.valor_avulso ?? c.valor_mensal, contrato_id: id } }));
 }
 
 /* ---------- novo (também chamado pelas propostas aprovadas) ---------- */

@@ -60,6 +60,12 @@ with sync_playwright() as p:
 
     # para aprovar
     ok('Paulo' in pg.inner_text('#ola') and pg.text_content('#empresa') == 'Imobiliária Horizonte', 'saudação com nome e empresa')
+    import datetime
+    FRASES = ['Tudo o que estamos construindo para sua marca, em um só lugar.', 'Sua marca em movimento. Acompanhe cada etapa por aqui.',
+              'Um espaço para acompanhar ideias, decisões e resultados.', 'Sua comunicação, seus projetos e nossos próximos passos.',
+              'Por aqui, cada detalhe da sua marca tem direção.', 'Boas-vindas ao espaço onde sua marca ganha forma.', 'Acompanhe de perto tudo o que estamos criando juntos.']
+    hoje = (datetime.date.today() - datetime.date(1970, 1, 1)).days
+    ok(pg.text_content('#frase') == FRASES[hoje % 7], 'frase do dia embaixo do Olá (gira pelas 7 frases, uma por dia): ' + pg.text_content('#frase'))
     ok(pg.locator('.abas .on').get_attribute('data-a') == 'aprovar' and pg.inner_text('.abas [data-a=aprovar] b') == '2', 'abre em "Para aprovar" com 2 pendentes')
     card = pg.locator('#aba article').first
     ok(card.locator('b.tit').inner_text() == 'Legenda' and card.locator('.imgs img').count() == 1 and card.locator('.arqs a').inner_text() == 'Plano.pdf', 'mostra texto, imagem e arquivo da entrega')

@@ -16,7 +16,6 @@ const txt = (v: unknown, max: number) => String(v ?? '').trim().slice(0, max);
 const EMAIL = /^[^@\s,;<>]+@[^@\s,;<>]+\.[^@\s,;<>]+$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const ENTREGUE = ['enviado', 'revisao', 'aprovado'];
-const PEDIDOS_POR_DIA = 10;
 
 async function logado(req: Request) {
   const t = req.headers.get('Authorization')?.replace(/^Bearer /, '');
@@ -77,50 +76,31 @@ async function dados(cid: string) {
   return { cliente: { nome: c?.nome, empresa: c?.empresa, estrategia: c?.estrategia ?? null }, projetos, pedidos: pedidos ?? [] };
 }
 
-// a entrega é de um projeto (não arquivado) deste cliente?
-async function minhaEntrega(cid: string, id: unknown) {
-  if (!UUID.test(String(id))) return null;
-  const { data: x } = await db.from('crm_entregas').select('id,titulo,status,crm_etapas(projeto_id,consulta,crm_projetos(id,nome,status,cliente_id))').eq('id', id).maybeSingle();
-  const p = x?.crm_etapas?.crm_projetos;
-  return p && p.cliente_id === cid && p.status !== 'arquivado' ? { ...x, projeto: p, consulta: !!x.crm_etapas.consulta } : null;
-}
-
-async function historico(cid: string, resumo: string) {
-  await db.from('crm_interacoes').insert({ cliente_id: cid, tipo: 'mensagem', resumo });
-}
+// aprovar / pedir alteração / nova solicitação: cada uma é uma transação no banco (crm_portal_entrega, crm_portal_pedido),
+// que confere de novo se a entrega é deste cliente, grava entrega + tarefa + histórico juntos e devolve o que precisa para o aviso.
+const resposta = (r: any): [unknown, number] => r?.erro ? [{ erro: r.erro }, r.codigo ?? 400] : [{ ok: true }, 200];
 
 async function agirNaEntrega(cid: string, nome: string, b: Record<string, unknown>): Promise<[unknown, number]> {
-  const x = await minhaEntrega(cid, b.entrega_id);
-  if (!x) return [{ erro: 'Entrega não encontrada.' }, 404];
-  if (x.consulta) return [{ erro: 'Este cartão é só para consulta.' }, 409];
-  if (x.status !== 'enviado') return [{ erro: 'Esta entrega não está aguardando a sua aprovação.' }, 409];
-  const agora = new Date().toISOString();
-  if (b.acao === 'aprovar') {
-    await db.from('crm_entregas').update({ status: 'aprovado', atualizado_em: agora }).eq('id', x.id);
-    await historico(cid, `Pelo portal: aprovou “${x.titulo}” (${x.projeto.nome}).`);
-    await avisar('Aprovado pelo cliente ✦', `${nome} aprovou “${x.titulo}”`, `app.html#/projeto/${x.projeto.id}`);
-    return [{ ok: true }, 200];
+  if (!UUID.test(String(b.entrega_id))) return [{ erro: 'Entrega não encontrada.' }, 404];
+  const { data: r, error } = await db.rpc('crm_portal_entrega', { p_cliente: cid, p_entrega: b.entrega_id, p_acao: b.acao, p_comentario: txt(b.comentario, 2000) || null });
+  if (error) throw error;
+  if (r?.ok) {
+    const url = `app.html#/projeto/${r.projeto_id}`;
+    if (b.acao === 'aprovar') await avisar(r.etapa_completa ? `${r.etapa} toda aprovada ✦` : 'Aprovado pelo cliente ✦', `${nome} aprovou “${r.titulo}”`, url);
+    else {
+      const alem = r.inclusos != null && r.revisoes > r.inclusos; // passou das rodadas de ajuste do contrato
+      await avisar(alem ? `Ajuste além do combinado (${r.revisoes}º, contrato inclui ${r.inclusos})` : 'Cliente pediu alteração',
+        `${nome} · “${r.titulo}”: ${txt(b.comentario, 80)}`, url);
+    }
   }
-  const comentario = txt(b.comentario, 2000);
-  if (comentario.length < 3) return [{ erro: 'Conte o que você quer mudar.' }, 400];
-  await db.from('crm_entregas').update({ status: 'revisao', atualizado_em: agora }).eq('id', x.id);
-  await db.from('crm_tarefas').insert({ cliente_id: cid, projeto_id: x.projeto.id, titulo: `Ajuste pedido pelo cliente: ${x.titulo}`.slice(0, 200),
-    descricao: comentario, prioridade: 'alta', origem: 'portal' });
-  await historico(cid, `Pelo portal: pediu alteração em “${x.titulo}” (${x.projeto.nome}).\n\n${comentario}`);
-  await avisar('Cliente pediu alteração', `${nome} · “${x.titulo}”: ${comentario.slice(0, 80)}`, `app.html#/projeto/${x.projeto.id}`);
-  return [{ ok: true }, 200];
+  return resposta(r);
 }
 
 async function pedir(cid: string, nome: string, b: Record<string, unknown>): Promise<[unknown, number]> {
-  const titulo = txt(b.titulo, 150), descricao = txt(b.descricao, 3000);
-  if (titulo.length < 3) return [{ erro: 'Dê um título para o pedido.' }, 400];
-  const { count } = await db.from('crm_tarefas').select('id', { count: 'exact', head: true }).eq('cliente_id', cid).eq('origem', 'portal')
-    .gte('criado_em', new Date(Date.now() - 864e5).toISOString());
-  if ((count ?? 0) >= PEDIDOS_POR_DIA) return [{ erro: 'Muitos pedidos hoje. Fale com a Rovya pelo WhatsApp.' }, 429];
-  await db.from('crm_tarefas').insert({ cliente_id: cid, titulo: `Pedido do cliente: ${titulo}`, descricao: descricao || null, prioridade: 'media', origem: 'portal' });
-  await historico(cid, `Pelo portal: nova solicitação “${titulo}”.${descricao ? '\n\n' + descricao : ''}`);
-  await avisar('Nova solicitação de cliente ✦', `${nome} · ${titulo}`, 'app.html#/tarefas');
-  return [{ ok: true }, 200];
+  const { data: r, error } = await db.rpc('crm_portal_pedido', { p_cliente: cid, p_titulo: txt(b.titulo, 150), p_descricao: txt(b.descricao, 3000) || null });
+  if (error) throw error;
+  if (r?.ok) await avisar('Nova solicitação de cliente ✦', `${nome} · ${r.titulo}`, 'app.html#/tarefas');
+  return resposta(r);
 }
 
 /* ---------- CRM (admin) ---------- */

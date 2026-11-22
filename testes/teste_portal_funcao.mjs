@@ -63,7 +63,29 @@ class Q {
 const novas = [], trocas = [], saidas = [];
 globalThis.__db = {
   from: t => new Q(t),
-  rpc: async (n, a) => { if (n === 'crm_portal_sair') saidas.push(a.p_user); return { error: null }; },
+  // as transações do portal ficam no banco (testadas no Supabase real, 024_fluxo.sql); aqui, a mesma regra em miniatura
+  rpc: async (n, a) => {
+    if (n === 'crm_portal_sair') saidas.push(a.p_user);
+    if (n === 'crm_portal_entrega') {
+      const x = T.crm_entregas.find(e => e.id === a.p_entrega), p = x && P[x._p];
+      if (!x || p.cliente_id !== a.p_cliente || p.status === 'arquivado') return { data: { erro: 'Entrega não encontrada.', codigo: 404 } };
+      if (x._consulta) return { data: { erro: 'Este cartão é só para consulta.', codigo: 409 } };
+      if (x.status !== 'enviado') return { data: { erro: 'Esta entrega não está aguardando a sua aprovação.', codigo: 409 } };
+      if (a.p_acao === 'aprovar') { x.status = 'aprovado'; T.crm_interacoes.push({ cliente_id: a.p_cliente, resumo: `Pelo portal: aprovou “${x.titulo}”` });
+        return { data: { ok: true, titulo: x.titulo, projeto_id: p.id, etapa: 'Semana 01', etapa_completa: x._ultima ?? false } }; }
+      if ((a.p_comentario || '').trim().length < 3) return { data: { erro: 'Conte o que você quer mudar.', codigo: 400 } };
+      x.status = 'revisao'; x.revisoes = (x.revisoes || 0) + 1;
+      T.crm_tarefas.push({ cliente_id: a.p_cliente, projeto_id: p.id, titulo: 'Ajuste pedido pelo cliente: ' + x.titulo, descricao: a.p_comentario, prioridade: 'alta', origem: 'portal', criado_em: new Date().toISOString() });
+      return { data: { ok: true, titulo: x.titulo, projeto_id: p.id, revisoes: x.revisoes, inclusos: x._inclusos ?? null } };
+    }
+    if (n === 'crm_portal_pedido') {
+      if ((a.p_titulo || '').length < 3) return { data: { erro: 'Dê um título para o pedido.', codigo: 400 } };
+      if (T.crm_tarefas.filter(t => t.cliente_id === a.p_cliente && t.origem === 'portal' && t.titulo.startsWith('Pedido do cliente:')).length >= 10) return { data: { erro: 'Muitos pedidos hoje.', codigo: 429 } };
+      T.crm_tarefas.push({ cliente_id: a.p_cliente, titulo: 'Pedido do cliente: ' + a.p_titulo, descricao: a.p_descricao, prioridade: 'media', origem: 'portal', status: 'a_fazer', criado_em: new Date().toISOString() });
+      return { data: { ok: true, titulo: a.p_titulo } };
+    }
+    return { error: null };
+  },
   auth: {
     getUser: async t => { const sub = JSON.parse(Buffer.from(t.split('.')[1], 'base64').toString()).sub; return { data: { user: usuarios.find(u => u.id === sub) ?? null } }; },
     admin: {
@@ -118,6 +140,12 @@ r = await chamar('u1', { acao: 'alterar', entrega_id: X.x1.id, comentario: ' ' }
 r = await chamar('u1', { acao: 'alterar', entrega_id: X.x1.id, comentario: 'Trocar a foto da capa' });
 const tAj = T.crm_tarefas.find(t => t.titulo.includes('Ajuste'));
 ok(r.s === 200 && X.x1.status === 'revisao' && tAj?.origem === 'portal' && tAj.prioridade === 'alta' && tAj.descricao === 'Trocar a foto da capa' && tAj.projeto_id === 'p1', 'pedir alteração: volta para revisão e vira tarefa de prioridade alta');
+ok(avisos.at(-1).titulo === 'Cliente pediu alteração', 'dentro das rodadas do contrato: aviso normal');
+X.x1.status = 'enviado'; X.x1._inclusos = 1;
+await chamar('u1', { acao: 'alterar', entrega_id: X.x1.id, comentario: 'Mais uma mudança' });
+ok(avisos.at(-1).titulo === 'Ajuste além do combinado (2º, contrato inclui 1)', 'passou das rodadas de ajuste do contrato: avisa diferente: ' + avisos.at(-1).titulo);
+X.y1.status = 'enviado'; X.y1._ultima = true; await chamar('u2', { acao: 'aprovar', entrega_id: X.y1.id });
+ok(avisos.at(-1).titulo === 'Semana 01 toda aprovada ✦', 'última peça da semana aprovada: avisa que a semana inteira foi aprovada');
 
 // solicitações
 r = await chamar('u1', { acao: 'pedir', titulo: 'ab' }); ok(r.s === 400, 'pedido sem título: recusa');
@@ -126,8 +154,8 @@ ok(r.s === 200 && T.crm_tarefas.some(t => t.titulo === 'Pedido do cliente: Post 
 T.crm_tarefas.push({ cliente_id: C2, titulo: 'Pedido do cliente: da Clara', origem: 'portal', status: 'a_fazer', criado_em: new Date().toISOString() });
 T.crm_tarefas.push({ cliente_id: C1, titulo: 'Tarefa interna', origem: null, status: 'a_fazer', criado_em: new Date().toISOString() });
 r = await chamar('u1', { acao: 'dados' });
-ok(r.j.pedidos.length === 2 && !JSON.stringify(r.j.pedidos).includes('Clara') && !JSON.stringify(r.j.pedidos).includes('interna'), 'vê só as solicitações dele, sem as tarefas internas');
-for (let i = 0; i < 8; i++) await chamar('u1', { acao: 'pedir', titulo: 'Pedido ' + i });
+ok(r.j.pedidos.length === T.crm_tarefas.filter(t => t.cliente_id === C1 && t.origem === 'portal').length && r.j.pedidos.length === 3 && !JSON.stringify(r.j.pedidos).includes('Clara') && !JSON.stringify(r.j.pedidos).includes('interna'), 'vê só as solicitações dele, sem as tarefas internas');
+for (let i = 0; i < 9; i++) await chamar('u1', { acao: 'pedir', titulo: 'Pedido ' + i }); // ajustes não contam no limite
 r = await chamar('u1', { acao: 'pedir', titulo: 'Mais um' }); ok(r.s === 429, 'limite de 10 solicitações por dia');
 
 // administração (CRM)

@@ -6,6 +6,10 @@ import { enviarAoDrive, pastaDoCliente, linhaDoc } from './drive.js';
 const STATUS_PROP = [['rascunho', 'Rascunho'], ['enviada', 'Enviada'], ['aprovada', 'Aprovada'], ['recusada', 'Recusada']];
 const COR_PROP = { rascunho: 'p-a_fazer', enviada: 'p-enviado', aprovada: 'p-aprovado', recusada: 'p-revisao' };
 const pillProp = st => `<span class="pill ${COR_PROP[st] || ''}">${rotulo(STATUS_PROP, st)}</span>`;
+// passagens permitidas (o banco confere a mesma regra: crm_proposta_trg em 024_fluxo.sql). Aceita online não volta.
+const proximosProp = p => ({ rascunho: ['enviada'], enviada: ['aprovada', 'recusada'], recusada: ['enviada'], aprovada: p.aceite_em ? [] : ['enviada'] })[p.status] || [];
+const BOTAO_ST = { enviada: 'Marcar enviada', aprovada: 'Aprovada', recusada: 'Recusada' };
+export const LINK_PROPOSTA = 'https://rovyacreative.com.br/proposta#';
 const BT_APAGAR = t => `<button class="bt fantasma" value="apagar" formnovalidate style="justify-self:start;color:var(--bad)">${t}</button>`;
 
 // dinheiro: sempre em centavos arredondados
@@ -27,8 +31,18 @@ const CAMPOS_SERVICO = [
   { k: 'preco', l: 'Preço base (R$)', t: 'number', meia: true }, { k: 'ativo', l: 'Ativo', t: 'select', o: [['true', 'Sim'], ['false', 'Não']], padrao: 'true', meia: true }];
 
 // devolve 'apagado', o id salvo, ou null (cancelou)
+// próximo código numérico livre, com dois dígitos (04, 10, 11…)
+const proximoCodigo = ts => String(Math.max(0, ...ts.map(x => parseInt(x.codigo, 10)).filter(n => !isNaN(n))) + 1).padStart(2, '0');
 async function editarServico(s) {
-  const v = await formulario(s ? s.nome : 'Novo serviço', CAMPOS_SERVICO, s || {}, s ? BT_APAGAR('Apagar serviço') : '');
+  const todos = await q(sb.from('crm_servicos').select('id,codigo,nome'));
+  let val = s || {}, erro = '', v;
+  for (; ;) { // código repetido: avisa e deixa o formulário aberto (o banco recusaria com uma mensagem técnica)
+    v = await formulario(s ? s.nome : 'Novo serviço', CAMPOS_SERVICO, val, (erro ? `<p class="atrasado">${esc(erro)}</p>` : '') + (s ? BT_APAGAR('Apagar serviço') : ''));
+    if (!v || $('#dlg').returnValue === 'apagar') break;
+    const dono = v.codigo && todos.find(x => x.codigo === v.codigo && x.id !== s?.id);
+    if (!dono) break;
+    erro = `Já existe um serviço com o código ${v.codigo} (${dono.nome}). Use outro, por exemplo ${proximoCodigo(todos)}.`; val = { ...val, ...v };
+  }
   if ($('#dlg').returnValue === 'apagar') {
     if (!await confirma(`Apagar “${s.nome}” do catálogo, com os planos e documentos? Propostas já feitas não mudam.`)) return null;
     await q(sb.from('crm_servicos').delete().eq('id', s.id));
@@ -197,10 +211,16 @@ export async function proposta(id) {
   const dis = ro ? 'disabled' : '';
   main.innerHTML = `<div class="topo"><div><div class="eyebrow"><a href="#/cliente/${c.id}">${esc(c.empresa || c.nome)}</a> · <a href="#/propostas">Propostas</a></div><h1 id="pTit">${esc(p.titulo)}</h1>
       <p>Proposta · ${vers.map(v => v.id === id ? `<b>v${v.versao}</b>` : `<a href="#/proposta/${v.id}">v${v.versao}</a>`).join(' · ')}${p.enviada_em ? ' · enviada ' + dataBR(p.enviada_em) : ''}</p></div>
-    <div class="acoes"><select id="st" class="busca" style="min-width:0">${STATUS_PROP.map(([k, l]) => `<option value="${k}" ${k === p.status ? 'selected' : ''}>${l}</option>`).join('')}</select>
+    <div class="acoes"><select id="st" class="busca" style="min-width:0">${STATUS_PROP.filter(([k]) => k === p.status || proximosProp(p).includes(k)).map(([k, l]) => `<option value="${k}" ${k === p.status ? 'selected' : ''}>${l}</option>`).join('')}</select>
       <button class="bt sec" id="pdf">Gerar PDF</button><button class="bt sec" id="envDrive">Enviar PDF ao Drive</button><button class="bt sec" id="nv">Nova versão</button>${ro ? '' : '<button class="bt" id="salvar">Salvar</button>'}</div></div>
     ${ro ? `<p class="card mute" style="margin:0 0 16px">Esta v${p.versao} é histórico e não se edita. Abra a <a href="#/proposta/${ult.id}">v${ult.versao}</a> ou use “Nova versão” para partir desta.</p>` : ''}
-    <div class="acoes" style="margin-bottom:18px">${p.status !== 'enviada' ? '<button class="bt peq sec" data-st="enviada">Marcar enviada</button>' : ''}${p.status !== 'aprovada' ? '<button class="bt peq sec" data-st="aprovada">Aprovada</button>' : ''}${p.status !== 'recusada' ? '<button class="bt peq sec" data-st="recusada">Recusada</button>' : ''}
+    ${p.aceite_em ? `<p class="card" style="margin:0 0 16px">✓ Aceita online por <b>${esc(p.aceite_nome)}</b> em ${new Date(p.aceite_em).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })}${p.aceite_ip ? ` <small class="mute">(IP ${esc(p.aceite_ip)})</small>` : ''}</p>` : ''}
+    ${p.status === 'enviada' && p.token && !ro ? `<section class="card" style="margin:0 0 16px"><h3>Link para o cliente aceitar</h3>
+      <p class="mute" style="margin:0 0 8px">O cliente abre, lê e clica em “Aceitar proposta”. Você recebe o aviso, o funil fecha sozinho e o contrato aparece no Início para criar.</p>
+      <div class="acoes"><input class="busca" id="linkProp" readonly value="${esc(LINK_PROPOSTA + p.token)}" style="flex:1;min-width:220px"><button class="bt peq sec" id="copiarLink">Copiar</button>
+      <a class="bt peq sec" target="_blank" rel="noopener" href="${esc(zap(c, `Oi, ${(c.nome || '').split(' ')[0]}! Segue a proposta “${p.titulo}”. Por este link você lê tudo e, se estiver de acordo, aceita por ali mesmo: ${LINK_PROPOSTA + p.token}`))}">WhatsApp</a>
+      <a class="bt peq fantasma" target="_blank" rel="noopener" href="${esc(LINK_PROPOSTA + p.token)}">Abrir ↗</a></div></section>` : ''}
+    <div class="acoes" style="margin-bottom:18px">${ro ? '' : proximosProp(p).map(st => `<button class="bt peq sec" data-st="${st}">${BOTAO_ST[st]}</button>`).join('')}
       <button class="bt peq fantasma" id="apagar" style="color:var(--bad)">Apagar esta versão</button></div>
     <section class="card" style="margin-bottom:18px"><div class="topo" style="margin-bottom:6px;align-items:center"><h3>Itens</h3>${ro ? '' : '<div class="acoes"><button class="bt peq sec" id="doCat">+ Do catálogo</button><button class="bt peq sec" id="livre">+ Item livre</button></div>'}</div>
       <table><thead><tr><th>Serviço</th><th class="dir">Qtd</th><th class="dir esconde-cel">Valor</th><th class="dir">Subtotal</th></tr></thead><tbody id="itens"></tbody><tfoot id="tot"></tfoot></table></section>
@@ -265,7 +285,7 @@ export async function proposta(id) {
 
   const mudar = async st => {
     await salvar();
-    await q(sb.from('crm_propostas').update({ status: st, ...(st === 'enviada' && { enviada_em: hoje() }) }).eq('id', id));
+    try { await q(sb.from('crm_propostas').update({ status: st, ...(st === 'enviada' && { enviada_em: hoje() }) }).eq('id', id)); } catch { return proposta(id); } // o banco recusa passagem errada (a mensagem aparece)
     toast('Proposta ' + rotulo(STATUS_PROP, st).toLowerCase());
     if (st === 'aprovada' && await confirma('Criar o contrato agora?')
       && await novoContrato({ cliente_id: c.id, proposta_id: id, titulo: p.titulo, valor_avulso: p.valor })) return; // contratos.js navega sozinho
@@ -274,6 +294,7 @@ export async function proposta(id) {
   $('#st').onchange = e => mudar(e.target.value);
   main.querySelectorAll('[data-st]').forEach(b => b.onclick = () => mudar(b.dataset.st));
 
+  if ($('#copiarLink')) $('#copiarLink').onclick = () => navigator.clipboard.writeText($('#linkProp').value).then(() => toast('Link copiado'), () => { $('#linkProp').select(); toast('Selecione e copie o link'); });
   $('#nv').onclick = async () => {
     await salvar();
     const { id: _, criado_em, crm_clientes, enviada_em, ...base } = p;
@@ -297,6 +318,9 @@ export async function proposta(id) {
     location.hash = resto.length ? '#/proposta/' + resto.at(-1).id : '#/propostas';
   };
 }
+
+// WhatsApp do cliente com a mensagem pronta (sem telefone na ficha, o WhatsApp abre para escolher o contato)
+const zap = (c, texto) => `https://wa.me/${c.telefone ? c.telefone.replace(/\D/g, '').replace(/^(?!55)/, '55') : ''}?text=${encodeURIComponent(texto)}`;
 
 /* ---------- PDF (impressão do navegador → “Salvar como PDF”) ---------- */
 const dataLonga = d => new Date(d + 'T12:00').toLocaleDateString('pt-BR', { day: 'numeric', month: 'long', year: 'numeric' });

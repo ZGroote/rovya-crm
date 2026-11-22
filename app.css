@@ -260,3 +260,13 @@ body.sem-rede #main::before{content:"Sem internet · mostrando os dados salvos n
 .sc.novo{border-style:dashed;border-width:2px}
 .horarios .h-salvar{justify-content:flex-start;align-items:center;margin-top:14px;position:sticky;bottom:0;background:var(--card);padding:10px 0 2px}
 @media (max-width:760px){.horarios .h-salvar{bottom:calc(62px + env(safe-area-inset-bottom))}.semana{grid-template-columns:26px repeat(7,minmax(0,1fr));gap:2px}.sc{font-size:0;padding:0}.semana .sh{font-size:.62rem;padding-right:2px}.horarios .h-nav{margin-left:0}}
+
+/* Produção: modo Selecionar */
+.op.marcada{outline:2px solid var(--wine);outline-offset:-1px;background:#8e0f1d0d}
+.op .marca{float:right;margin:2px 0 4px 8px;accent-color:var(--wine);pointer-events:none}
+.funil .col header .bt.peq{padding:2px 8px;font-size:.72rem}
+.barra-sel{position:sticky;bottom:12px;margin-right:150px;z-index:5;display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin-top:12px;padding:10px 14px;background:var(--card);border:1px solid var(--line);border-radius:var(--r);box-shadow:0 8px 24px #0000001f}
+.barra-sel b{margin-right:auto;font-weight:500}
+.bt.perigo{background:var(--bad)}
+.bt:disabled{opacity:.5;cursor:not-allowed}
+@media (max-width:760px){.barra-sel{bottom:calc(70px + env(safe-area-inset-bottom));margin-right:96px}}

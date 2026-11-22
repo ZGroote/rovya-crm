@@ -13,16 +13,22 @@ const COMO_USAR = `## Como usar o portal
 **Arquivos:** tudo o que já foi entregue, para baixar.
 **Solicitações:** precisa de algo novo? Peça por lá. A Rovya recebe o aviso na hora.`;
 
-// estrutura de um mês: Planejamento Estratégico, uma coluna por semana (posts seg/qua/sex), Radar e Guia
-export function mesDeConteudo(mes, cliente) {
+// estrutura de um mês: Planejamento Estratégico, uma coluna por semana, Radar e Guia.
+// posts = quantos posts o contrato inclui; sem número, segunda, quarta e sexta. Com número, espalha pelo mês
+// (seg/qua/sex quando cabe; se o contrato pede mais, usa de segunda a sábado).
+export function mesDeConteudo(mes, cliente, posts = null) {
   const [a, m] = mes.split('-').map(Number), nome = MESES[m - 1], rot = nome[0].toUpperCase() + nome.slice(1) + ' ' + a;
   const empresa = (cliente?.empresa || cliente?.nome || 'Rovya').toUpperCase();
+  const ultimo = new Date(a, m, 0).getDate(), dia = d => new Date(a, m - 1, d).getDay();
+  const todos = Array.from({ length: ultimo }, (_, i) => i + 1), base = todos.filter(d => DIAS_POST.includes(dia(d)));
+  const pool = !posts || posts <= base.length ? base : todos.filter(d => dia(d) >= 1 && dia(d) <= 6);
+  const n = Math.min(posts || base.length, pool.length);
+  const dias = new Set(Array.from({ length: n }, (_, i) => pool[Math.floor(i * pool.length / n)]));
   const semanas = [];
-  for (let d = 1, ultimo = new Date(a, m, 0).getDate(); d <= ultimo; d++) {
-    const w = new Date(a, m - 1, d).getDay();
-    if (d === 1 || w === 1) semanas.push({ de: d, ate: d, posts: [] });
+  for (const d of todos) {
+    if (d === 1 || dia(d) === 1) semanas.push({ de: d, ate: d, posts: [] });
     const s = semanas.at(-1); s.ate = d;
-    if (DIAS_POST.includes(w)) s.posts.push(d);
+    if (dias.has(d)) s.posts.push(d);
   }
   const cartao = d => ({ titulo: `Publicar em ${dd(d)}/${dd(m)}`, prazo: `${a}-${dd(m)}-${dd(d)}`,
     texto: `## ${empresa} | PRODUÇÃO DE CONTEÚDO\n**Data:** ${dd(d)}/${dd(m)}/${a} — ${SEMANA[new Date(a, m - 1, d).getDay()]}\n**Formato:** \n**Tema:** \n\n## Sobre o conteúdo\n{{contato}}, ` });
@@ -33,6 +39,14 @@ export function mesDeConteudo(mes, cliente) {
     { titulo: 'Radar e Oportunidades', consulta: true, entregas: [`Radar de ${nome}`, 'Datas e Prazos Importantes', 'Dúvidas Reais do Público'] },
     { titulo: 'Guia de Publicação', consulta: true, entregas: [{ titulo: 'Como usar o portal', texto: COMO_USAR }, 'Guia de Publicação'] },
   ];
+}
+// cria o projeto do mês de um contrato mensal (contrato + mês ficam gravados; o banco não deixa criar o mesmo mês duas vezes)
+export async function criarMesDoContrato(k, mes) {
+  const c = k.crm_clientes, nome = `${c?.empresa || c?.nome || 'Rovya'} · ${rotuloMes(mes)}`, [a, m] = mes.split('-').map(Number);
+  const pid = await q(sb.rpc('crm_projeto_de_modelo', { p_cliente: k.cliente_id, p_nome: nome, p_modelo: null, p_estrutura: mesDeConteudo(mes, c, k.posts_mes),
+    p_contrato: k.id, p_mes: mes, p_valor: k.valor_mensal ?? null, p_entrega: `${mes}-${dd(new Date(a, m, 0).getDate())}` })); // entrega = último dia do mês
+  toast(`${rotuloMes(mes)} criado para ${c?.empresa || c?.nome}`);
+  return pid;
 }
 export const rotuloMes = mes => { const [a, m] = mes.split('-').map(Number); return MESES[m - 1][0].toUpperCase() + MESES[m - 1].slice(1) + ' ' + a; };
 export const proximoMes = () => { const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() + 1); return d.toLocaleDateString('sv').slice(0, 7); };

@@ -1,10 +1,11 @@
 import { sb, $, main, esc, brl, diaLocal, hoje, dataBR, venceu, toast, q, rotulo, preencher, mdHtml, mdTexto, formulario, confirma, listaClientes, opcoesClientes, funcao, avisoNotificacoes, baixarCsv, semRede, sessaoSalva, registrarFalha, anexosGrandes, LIMITE_ANEXO_MB, salvar, comPendentes, campos, lerEscritas, limparEscritas, enviarEscritas, mesesAtras } from './util.js';
-import { producao, STATUS_ENT, FORMATOS, seloPeca } from './producao.js';
+import { producao, STATUS_ENT, FORMATOS, seloPeca, apagarEntregas } from './producao.js';
 import { servicos, servico, propostas, proposta, novaProposta, propostasDoCliente } from './comercial.js';
 import { contratos, contrato, novoContrato, alertasContratos, contratosDoCliente } from './contratos.js';
 import { documentos, cartaoDrive, ligarCartaoDrive } from './drive.js';
 import { cartaoPortal, ligarPortal } from './portal.js';
 import { mesDeConteudo, rotuloMes, proximoMes, importarTrello } from './conteudo.js';
+import { pendenciasFluxo, cartaoFluxo, ligarFluxo } from './fluxo.js';
 import { financeiro, abaFinanceiro } from './financeiro.js';
 import { configuracoes } from './configuracoes.js';
 import { relatorios } from './relatorios.js';
@@ -85,7 +86,7 @@ async function novoCliente() {
 /* ---------- INÍCIO ---------- */
 async function inicio() {
   const em7 = diaLocal(7);
-  const [opsLidas, ents, parc, projs, alertas, tars, falhas] = await Promise.all([
+  const [opsLidas, ents, parc, projs, alertas, tars, falhas, fluxo] = await Promise.all([
     q(sb.from('crm_oportunidades').select('id,titulo,proximo_passo,proximo_em,etapa,crm_clientes(nome)').not('etapa', 'in', '(ganho,perdido)').not('proximo_em', 'is', null).lte('proximo_em', em7).order('proximo_em')),
     q(sb.from('crm_entregas').select('id,titulo,prazo,status,crm_etapas!inner(projeto_id,crm_projetos!inner(nome,status))').neq('status', 'aprovado').eq('crm_etapas.crm_projetos.status', 'ativo').not('prazo', 'is', null).lte('prazo', em7).order('prazo')),
     q(sb.from('crm_parcelas').select('id,descricao,valor,vencimento,crm_projetos(nome)').eq('tipo', 'receita').is('pago_em', null).lte('vencimento', em7).order('vencimento')),
@@ -94,6 +95,7 @@ async function inicio() {
     tarefasDaSemana(),
     // erros de código (origem 'tela') ficam só em Configurações: são para quem mantém o CRM, não para a Sabrina
     sb.from('crm_falhas').select('id,mensagem').eq('resolvida', false).neq('origem', 'tela').order('quando', { ascending: false }).limit(5).then(r => r.data || [], () => []),
+    pendenciasFluxo().catch(e => { console.error(e); return []; }), // sem internet ou erro: o Início abre sem o cartão
   ]);
   const ops = comPendentes('crm_oportunidades', opsLidas, o => !['ganho', 'perdido'].includes(o.etapa) && o.proximo_em && o.proximo_em <= em7).sort((a, b) => a.proximo_em.localeCompare(b.proximo_em));
   const nFila = lerFila().length, nEsc = lerEscritas().length;
@@ -105,8 +107,9 @@ async function inicio() {
   <div class="topo"><div><div class="eyebrow">${new Date().toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' })}</div><h1>${saud}, Sabrina</h1></div>
     <div class="acoes"><button class="bt sec" id="nOp">+ Oportunidade</button><button class="bt" id="nCli">+ Cliente</button></div></div>
   ${avisos.length ? `<section class="card avisos"><h3>Avisos</h3><ul class="lista">${avisos.map(a => `<li>⚠ ${a}</li>`).join('')}</ul>${falhas.length ? '<p><a href="#/configuracoes" class="mute">Ver e marcar como resolvidos →</a></p>' : ''}</section>` : ''}
+  ${cartaoFluxo(fluxo)}
   <div class="grade2">
-    <section class="card"><h3>Próximos passos</h3><ul class="lista">${ops.map(o => `<li><div class="cresce"><b>${esc(o.proximo_passo || o.titulo)}</b><small>${esc(o.crm_clientes?.nome)} · ${esc(rotulo(ETAPAS_FUNIL, o.etapa))}</small></div><span class="${venceu(o.proximo_em) ? 'atrasado' : 'mute'}">${dataBR(o.proximo_em)}</span></li>`).join('') || '<li class="vazio">Nada para esta semana.</li>'}</ul><p><a href="#/funil" class="mute">Ver funil →</a></p></section>
+    <section class="card"><h3>Funil: próximos contatos</h3><ul class="lista">${ops.map(o => `<li><div class="cresce"><b>${esc(o.proximo_passo || o.titulo)}</b><small>${esc(o.crm_clientes?.nome)} · ${esc(rotulo(ETAPAS_FUNIL, o.etapa))}</small></div><span class="${venceu(o.proximo_em) ? 'atrasado' : 'mute'}">${dataBR(o.proximo_em)}</span></li>`).join('') || '<li class="vazio">Nada para esta semana.</li>'}</ul><p><a href="#/funil" class="mute">Ver funil →</a></p></section>
     <section class="card"><h3>Entregas com prazo</h3><ul class="lista">${ents.map(e => `<li><div class="cresce"><b>${esc(e.titulo)}</b><small>${esc(e.crm_etapas.crm_projetos.nome)}</small></div><span class="pill p-${e.status}">${rotulo(STATUS_ENT, e.status)}</span><span class="${venceu(e.prazo) ? 'atrasado' : 'mute'}">${dataBR(e.prazo)}</span></li>`).join('') || '<li class="vazio">Nenhum prazo nos próximos 7 dias.</li>'}</ul></section>
     <section class="card"><h3>A receber</h3><ul class="lista">${parc.map(p => `<li><div class="cresce"><b>${brl(p.valor)}</b><small>${esc(p.crm_projetos?.nome)}${p.descricao ? ' · ' + esc(p.descricao) : ''}</small></div><span class="${venceu(p.vencimento) ? 'atrasado' : 'mute'}">${venceu(p.vencimento) ? 'atrasada · ' : ''}${dataBR(p.vencimento)}</span></li>`).join('') || '<li class="vazio">Nenhuma parcela vencendo.</li>'}</ul><p><a href="#/financeiro" class="mute">Ver financeiro →</a></p></section>
     ${alertas.length ? `<section class="card"><h3>Contratos</h3><ul class="lista">${alertas.map(a => `<li><a class="cresce" href="${a.href}"><b>${esc(a.titulo)}</b><small>${esc(a.sub)}</small></a><span class="${a.atrasado ? 'atrasado' : 'mute'}">${dataBR(a.data)}</span></li>`).join('')}</ul><p><a href="#/contratos" class="mute">Ver contratos →</a></p></section>` : ''}
@@ -118,6 +121,7 @@ async function inicio() {
   $('#nCli').onclick = async () => { const c = await novoCliente(); if (c) location.hash = '#/cliente/' + c.id; };
   $('#nOp').onclick = async () => { if (await novaOportunidade()) location.hash = '#/funil'; };
   ligarLinhas($('#cTarefas'), tars, inicio);
+  ligarFluxo($('#cFluxo'), fluxo, inicio);
   // agenda de hoje (não bloqueia a tela)
   google('listar', { de: new Date(hoje() + 'T00:00').toISOString(), ate: new Date(hoje() + 'T23:59:59').toISOString() }).then(r => {
     const el = $('#agHoje'); if (!el) return;
@@ -147,7 +151,15 @@ async function editarOportunidade(o) {
     { k: 'tipo_lead', l: 'Tipo de lead', t: 'select', o: TIPOS_LEAD },
     { k: 'proximo_passo', l: 'Próximo passo' }, { k: 'proximo_em', l: 'Quando', t: 'date' },
     { k: 'motivo_perda', l: 'Se perdido: motivo' }, { k: 'notas', l: 'Notas', t: 'textarea', linhas: 4 }], o,
-    `<div class="acoes"><a class="bt peq fantasma" href="#/cliente/${o.cliente_id}" onclick="document.getElementById('dlg').close()">Abrir ficha do cliente →</a><button class="bt peq sec" value="contato" formnovalidate>Registrar contato</button><button class="bt peq sec" value="proposta" formnovalidate>Criar proposta</button></div>`);
+    `<div class="acoes"><a class="bt peq fantasma" href="#/cliente/${o.cliente_id}" onclick="document.getElementById('dlg').close()">Abrir ficha do cliente →</a><button class="bt peq sec" value="contato" formnovalidate>Registrar contato</button><button class="bt peq sec" value="proposta" formnovalidate>Criar proposta</button></div>
+    <button class="bt fantasma" value="apagar" formnovalidate style="justify-self:start;color:var(--bad)">Apagar oportunidade</button>`);
+  if ($('#dlg').returnValue === 'apagar') {
+    // histórico de contatos, propostas e projetos ficam (só perdem a ligação com o cartão). Para lead que não fechou, "Perdido" guarda o motivo.
+    if (await confirma(`Apagar a oportunidade “${o.titulo}”? O histórico de contatos e as propostas do cliente continuam. Se o cliente só não fechou, prefira mover para Perdido.`)) {
+      await q(sb.from('crm_oportunidades').delete().eq('id', o.id)); toast('Oportunidade apagada');
+    }
+    return;
+  }
   if ($('#dlg').returnValue === 'contato') return registrarContato(o.cliente_id, o);
   if ($('#dlg').returnValue === 'proposta') return novaProposta({ cliente_id: o.cliente_id, oportunidade_id: o.id, titulo: o.titulo });
   if (!v) return;
@@ -278,11 +290,10 @@ async function cliente(id) {
 
 /* ---------- PROJETOS ---------- */
 // a ficha do contrato pede o projeto por evento (contratos.js não importa app.js)
-addEventListener('crm:criar-projeto', async ({ detail: d }) => {
-  const pid = await criarProjeto(d.cliente_id, d.nome, null, d.valor);
-  if (pid && d.contrato_id) await q(sb.from('crm_contratos').update({ projeto_id: pid }).eq('id', d.contrato_id));
-});
-async function criarProjeto(clienteId, nome, oportunidadeId = null, valor = null) {
+// (fluxo.js também: "Contrato sem projeto", "Fechado sem projeto"). detail.pronto = a promessa, para quem pediu esperar o formulário.
+addEventListener('crm:criar-projeto', ({ detail: d }) => { d.pronto = criarProjeto(d.cliente_id, d.nome, d.oportunidade_id ?? null, d.valor, d.contrato_id ?? null); });
+// contrato e mês vão junto na mesma gravação (crm_projeto_de_modelo); "Mês de conteúdo" de cliente com contrato mensal já sai ligado a ele
+async function criarProjeto(clienteId, nome, oportunidadeId = null, valor = null, contratoId = null) {
   const mods = await q(sb.from('crm_modelos').select('id,titulo').eq('tipo', 'projeto').order('criado_em'));
   const v = await formulario('Novo projeto', [
     { k: 'nome', l: 'Nome do projeto', req: true },
@@ -290,17 +301,20 @@ async function criarProjeto(clienteId, nome, oportunidadeId = null, valor = null
     { k: 'valor', l: 'Valor do contrato (R$)', t: 'number', meia: true }, { k: 'entrega_prevista', l: 'Entrega prevista', t: 'date', meia: true }],
     { nome, valor, modelo: mods[0]?.id ?? '' });
   if (!v) return;
-  let estrutura = null;
+  let estrutura = null, mes = null;
   if (v.modelo === 'mes') {
     const m = await formulario('Mês de conteúdo', [{ k: 'mes', l: 'Mês', t: 'month', req: true }], { mes: proximoMes() },
       '<p class="mute" style="margin:0">Cria Planejamento Estratégico, uma coluna por semana com os posts de segunda, quarta e sexta, Radar e Guia de Publicação. Datas e cartões você muda depois.</p>', 'Criar');
     if (!m) return;
     const [c] = clienteId ? await q(sb.from('crm_clientes').select('nome,empresa').eq('id', clienteId)) : [null];
-    estrutura = mesDeConteudo(m.mes, c); v.modelo = null;
+    const ks = clienteId ? (await q(sb.from('crm_contratos').select('id,tipo,status,posts_mes').eq('cliente_id', clienteId).eq('status', 'vigente'))).filter(k => k.tipo !== 'avulso' && k.posts_mes) : [];
+    const k = ks.find(x => x.id === contratoId) ?? (ks.length === 1 ? ks[0] : null); // contrato mensal dele: o mês conta no escopo
+    if (k) { contratoId = k.id; mes = m.mes; }
+    estrutura = mesDeConteudo(m.mes, c, k?.posts_mes); v.modelo = null;
     if (!v.nome.includes(rotuloMes(m.mes))) v.nome += ' · ' + rotuloMes(m.mes);
   }
-  const pid = await q(sb.rpc('crm_projeto_de_modelo', { p_cliente: clienteId, p_nome: v.nome, p_modelo: v.modelo, p_oportunidade: oportunidadeId, p_estrutura: estrutura }));
-  await q(sb.from('crm_projetos').update({ valor: v.valor, entrega_prevista: v.entrega_prevista }).eq('id', pid));
+  const pid = await q(sb.rpc('crm_projeto_de_modelo', { p_cliente: clienteId, p_nome: v.nome, p_modelo: v.modelo, p_oportunidade: oportunidadeId, p_estrutura: estrutura,
+    p_contrato: contratoId, p_mes: mes, p_valor: v.valor, p_entrega: v.entrega_prevista }));
   toast('Projeto criado'); location.hash = '#/projeto/' + pid; return pid;
 }
 async function projetos(arquivados) {
@@ -336,10 +350,13 @@ async function projeto(id, aba = 'etapas') {
   if ($('#encerrar')) $('#encerrar').onclick = () => encerrarProjeto(p).then(ok => ok && projeto(id, aba));
   if ($('#desarq')) $('#desarq').onclick = async () => { if (!await confirma('Desarquivar? O projeto volta como “Concluído”.')) return; await q(sb.from('crm_projetos').update({ status: 'concluido', arquivado_em: null }).eq('id', id)); projeto(id, aba); };
   $('#ed').onclick = async () => {
-    const v = await formulario('Editar projeto', [{ k: 'nome', l: 'Nome', req: true }, { k: 'valor', l: 'Valor do contrato (R$)', t: 'number', meia: true }, { k: 'entrega_prevista', l: 'Entrega prevista', t: 'date', meia: true }], p,
+    const ks = c ? await q(sb.from('crm_contratos').select('id,titulo,status').eq('cliente_id', c.id).order('criado_em', { ascending: false })) : [];
+    const v = await formulario('Editar projeto', [{ k: 'nome', l: 'Nome', req: true }, { k: 'valor', l: 'Valor do contrato (R$)', t: 'number', meia: true }, { k: 'entrega_prevista', l: 'Entrega prevista', t: 'date', meia: true },
+      ...(ks.length ? [{ k: 'contrato_id', l: 'Contrato', t: 'select', o: [['', 'Nenhum'], ...ks.map(k => [k.id, `${k.titulo} · ${k.status}`])], meia: true },
+        { k: 'mes', l: 'Mês de conteúdo (conta no escopo)', t: 'month', meia: true }] : [])], p,
       `<div class="acoes"><button class="bt fantasma" value="modelo" formnovalidate>Salvar estrutura como modelo</button><button class="bt fantasma" value="apagar" formnovalidate style="color:var(--bad)">Apagar projeto</button></div>`);
     const rv = $('#dlg').returnValue;
-    if (rv === 'apagar') { if (await confirma(`Apagar o projeto “${p.nome}”?`)) { await q(sb.from('crm_projetos').delete().eq('id', id)); location.hash = '#/projetos'; } return; }
+    if (rv === 'apagar') { if (await confirma(`Apagar o projeto “${p.nome}”? As peças e os arquivos delas também são apagados.`)) { await apagarEntregas(es.map(x => x.id)); await q(sb.from('crm_projetos').delete().eq('id', id)); location.hash = '#/projetos'; } return; }
     if (rv === 'modelo') return salvarComoModelo(p);
     if (v) { await q(sb.from('crm_projetos').update(v).eq('id', id)); projeto(id, aba); }
   };
@@ -370,7 +387,7 @@ async function projeto(id, aba = 'etapas') {
     const e = porEtapa[b.dataset.edEtapa];
     const v = await formulario('Editar etapa', [{ k: 'titulo', l: 'Título', req: true }, CAMPO_CONSULTA, { k: 'orientacao', l: 'Orientação (use {{empresa}} e {{contato}})', t: 'textarea', linhas: 10 }], { ...e, consulta: e.consulta ? '1' : '' },
       '<button class="bt fantasma" value="apagar" formnovalidate style="justify-self:start;color:var(--bad)">Apagar etapa</button>');
-    if ($('#dlg').returnValue === 'apagar') { if (await confirma(`Apagar a etapa “${e.titulo}” e suas entregas?`)) { await q(sb.from('crm_etapas').delete().eq('id', e.id)); projeto(id, aba); } return; }
+    if ($('#dlg').returnValue === 'apagar') { if (await confirma(`Apagar a etapa “${e.titulo}” e suas entregas?`)) { await apagarEntregas(e.crm_entregas.map(x => x.id)); await q(sb.from('crm_etapas').delete().eq('id', e.id)); projeto(id, aba); } return; }
     if (v) { await q(sb.from('crm_etapas').update({ ...v, consulta: !!v.consulta }).eq('id', e.id)); projeto(id, aba); }
   });
   $('#nEtapa').onclick = async () => {
@@ -398,7 +415,7 @@ async function abrirEntrega(x, p) {
   const arquivos = $('#arq');
   arquivos.onchange = () => { if (anexosGrandes(arquivos.files)) arquivos.value = ''; }; // avisa já na escolha, antes de salvar
   const v = await pr;
-  if ($('#dlg').returnValue === 'apagar') { if (await confirma(`Apagar a entrega “${x.titulo}”?`)) await q(sb.from('crm_entregas').delete().eq('id', x.id)); return; }
+  if ($('#dlg').returnValue === 'apagar') { if (await confirma(`Apagar a entrega “${x.titulo}”? Os arquivos dela também são apagados.`)) await apagarEntregas([x.id]); return; }
   if (!v) return;
   await q(sb.from('crm_entregas').update({ ...v, atualizado_em: new Date().toISOString() }).eq('id', x.id));
   for (const f of arquivos.files) {

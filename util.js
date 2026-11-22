@@ -163,7 +163,14 @@ export async function funcao(nome, acao, dados = {}) {
   const chamar = async forcar => fetch(`${SUPABASE_URL}/functions/v1/${nome}`, { method: 'POST', headers: { Authorization: 'Bearer ' + await tokenAtual(forcar), 'Content-Type': 'application/json' }, body: JSON.stringify({ acao, ...dados }) });
   let r = await chamar(false);
   if (r.status === 401) r = await chamar(true);
-  const j = await r.json().catch(() => ({})); if (!r.ok) { const m = j.erro || 'Falha (' + r.status + ')'; registrarFalha(nome, acao, m); throw new Error(m); } return j;
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) {
+    const m = j.erro || 'Falha (' + r.status + ')';
+    // vai para "Falhas de integração" só o que é defeito (servidor, permissão); 400/404/409/429 são respostas ao que ela digitou e já aparecem na tela
+    if (r.status >= 500 || r.status === 401 || r.status === 403) registrarFalha(nome, acao, m);
+    throw new Error(m);
+  }
+  return j;
 }
 // guarda a falha de integração para a Sabrina ver em Configurações (nunca quebra a tela se o registro falhar)
 export const registrarFalha = (origem, acao, mensagem) => sb.from('crm_falhas').insert({ origem, acao, mensagem: String(mensagem).slice(0, 500) }).then(() => { }, () => { });
