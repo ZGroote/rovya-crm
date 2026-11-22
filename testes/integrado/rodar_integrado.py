@@ -107,7 +107,7 @@ def copia(origem, destino):
     for p in destino.rglob('*'):
         if p.suffix in ('.html', '.js', '.css', '.webmanifest', '.json'):
             t = p.read_text(encoding='utf-8', errors='ignore')
-            if PROD_REF in t or PROD_CHAVE in t: p.write_text(t.replace(PROD_URL, API).replace(PROD_CHAVE, ANON), encoding='utf-8')
+            if PROD_REF in t or PROD_CHAVE in t: p.write_text(t.replace(PROD_URL, API).replace(PROD_CHAVE, ANON).replace(f'sb-{PROD_REF}-', 'sb-127-'), encoding='utf-8')  # nome da chave de login no navegador
     sobra = [p.name for p in destino.rglob('*') if p.suffix in ('.html', '.js') and PROD_REF in p.read_text(encoding='utf-8', errors='ignore')]
     if sobra: sys.exit('PARADO: endereço de produção na cópia de teste: ' + ', '.join(sobra))
 def servir(pasta, porta):
