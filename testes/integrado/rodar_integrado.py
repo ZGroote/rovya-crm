@@ -70,7 +70,8 @@ def montar_banco():
     sobra = psql(f"select count(*) from cron.job") + '/' + psql(f"select count(*) from pg_proc where prosrc like '%{PROD_REF}%'")
     return feitas, sobra
 feitas, sobra = montar_banco()
-ok('INF-01', 'Migrações 001–024 aplicadas no banco temporário (002_seed fica fora do git)', feitas[-1] == '024_fluxo.sql' and '001_crm.sql' in feitas, ', '.join(feitas))
+todas = sorted(f.name for f in (RAIZ / 'supabase').glob('0*.sql') if f.name != '002_seed.sql')
+ok('INF-01', f'Todas as migrações do repositório aplicadas no banco temporário ({todas[0][:3]}–{todas[-1][:3]}; 002_seed fica fora do git)', feitas == todas and '001_crm.sql' in feitas, ', '.join(feitas))
 ok('INF-02', 'Nenhuma rotina automática ligada e nenhuma função do banco citando produção', sobra == '0/0', 'rotinas/funções com produção: ' + sobra)
 
 # ---------- 2) HTTP ----------
