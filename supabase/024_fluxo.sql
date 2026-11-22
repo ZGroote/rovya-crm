@@ -21,7 +21,8 @@ alter table public.crm_propostas
   add column if not exists token text unique,      -- link para o cliente ver e aceitar (gerado ao enviar)
   add column if not exists aceite_em timestamptz,
   add column if not exists aceite_nome text,
-  add column if not exists aceite_ip text;
+  add column if not exists aceite_ip text,
+  add column if not exists renova_contrato uuid references public.crm_contratos on delete set null; -- proposta de renovação: qual contrato ela renova
 
 create or replace function public.crm_proposta_trg() returns trigger
 language plpgsql set search_path = '' as $$

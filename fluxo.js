@@ -18,7 +18,7 @@ const zap = (c, texto) => `https://wa.me/${c?.telefone ? c.telefone.replace(/\D/
 export async function pendenciasFluxo() {
   const desde = diaLocal(-JANELA);
   const [props, ks, projs, ops, ents, acessos] = await Promise.all([
-    q(sb.from('crm_propostas').select('id,grupo,versao,titulo,valor,status,cliente_id,oportunidade_id,criado_em,aceite_em,crm_clientes(id,nome,empresa)').gte('criado_em', desde)),
+    q(sb.from('crm_propostas').select('id,grupo,versao,titulo,valor,status,cliente_id,oportunidade_id,renova_contrato,criado_em,aceite_em,crm_clientes(id,nome,empresa)').gte('criado_em', desde)),
     q(sb.from('crm_contratos').select('id,titulo,tipo,status,cliente_id,proposta_id,projeto_id,posts_mes,ajustes_inclusos,valor_mensal,valor_avulso,inicio,fim,aviso_dias,crm_clientes(id,nome,empresa)').in('status', ['rascunho', 'assinatura', 'vigente'])),
     q(sb.from('crm_projetos').select('id,cliente_id,oportunidade_id,contrato_id,mes,status').neq('status', 'arquivado')),
     q(sb.from('crm_oportunidades').select('id,titulo,cliente_id,valor,etapa,fechado_em,crm_clientes(id,nome,empresa)').eq('etapa', 'ganho').gte('fechado_em', desde)),
@@ -76,11 +76,11 @@ export async function pendenciasFluxo() {
     out.push({ icone: '➚', titulo: `Publicar ${x.prazo === h ? 'hoje' : 'amanhã'}: ${x.titulo}`, sub: `${nome(x.crm_etapas.crm_projetos.crm_clientes)} · aprovado`, botao: 'Abrir projeto', href: '#/projeto/' + x.crm_etapas.crm_projetos.id });
 
   // 8) contrato perto do fim sem proposta de renovação
+  // só uma proposta ligada a ESTE contrato (renova_contrato) tira o aviso; proposta de outro serviço do mesmo cliente não conta
   for (const k of ks.filter(k => k.status === 'vigente' && k.fim && k.fim <= diaLocal(k.aviso_dias ?? 30))) {
-    const desdeAviso = new Date(new Date(k.fim + 'T12:00') - (k.aviso_dias ?? 30) * 864e5).toISOString();
-    if (props.some(p => p.cliente_id === k.cliente_id && p.criado_em >= desdeAviso)) continue;
+    if (props.some(p => p.renova_contrato === k.id && p.status !== 'recusada')) continue;
     out.push({ icone: '⟳', titulo: `Contrato ${k.fim < h ? 'venceu' : 'vence'} ${dataBR(k.fim)}: preparar renovação`, sub: `${nome(k.crm_clientes)} · ${k.titulo}`, botao: 'Preparar proposta',
-      fazer: () => novaProposta({ cliente_id: k.cliente_id, titulo: 'Renovação · ' + k.titulo }) });
+      fazer: () => novaProposta({ cliente_id: k.cliente_id, titulo: 'Renovação · ' + k.titulo, renova_contrato: k.id }) });
   }
   return out;
 }

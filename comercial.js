@@ -175,7 +175,7 @@ export async function novaProposta(val = {}) {
   if (!v) return null;
   let corpo = val.corpo || null;   // a assistente pode mandar o texto pronto
   if (v.modelo) { const [c] = await q(sb.from('crm_clientes').select('*').eq('id', v.cliente_id)); corpo = preencher(mods.find(m => m.id === v.modelo).corpo, c); }
-  const [p] = await q(sb.from('crm_propostas').insert({ cliente_id: v.cliente_id, oportunidade_id: val.oportunidade_id || null, titulo: v.titulo, corpo, validade: v.validade }).select('id'));
+  const [p] = await q(sb.from('crm_propostas').insert({ cliente_id: v.cliente_id, oportunidade_id: val.oportunidade_id || null, renova_contrato: val.renova_contrato || null, titulo: v.titulo, corpo, validade: v.validade }).select('id'));
   toast('Proposta criada'); location.hash = '#/proposta/' + p.id; return p.id;
 }
 
