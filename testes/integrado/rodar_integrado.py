@@ -6,7 +6,8 @@
 #   - o navegador bloqueia qualquer pedido a produção e o teste falha se algum acontecer;
 #   - a crm-assistente é trocada por um capturador (avisos vão para a tabela teste_avisos, nada sai).
 # Uso (no workflow): supabase start → functions serve → python testes/integrado/rodar_integrado.py
-import os, sys, json, re, shutil, subprocess, threading, datetime, pathlib, functools, traceback, http.server, concurrent.futures
+import os, sys, json, re, shutil, subprocess, threading, datetime, pathlib, functools, traceback, concurrent.futures
+import http.server as servidor_http
 import urllib.request, urllib.error
 
 RAIZ = pathlib.Path(__file__).resolve().parents[2]
@@ -111,8 +112,8 @@ def copia(origem, destino):
     sobra = [p.name for p in destino.rglob('*') if p.suffix in ('.html', '.js') and PROD_REF in p.read_text(encoding='utf-8', errors='ignore')]
     if sobra: sys.exit('PARADO: endereço de produção na cópia de teste: ' + ', '.join(sobra))
 def servir(pasta, porta):
-    h = functools.partial(http.server.SimpleHTTPRequestHandler, directory=str(pasta)); h.log_message = lambda *a: None
-    s = http.server.ThreadingHTTPServer(('127.0.0.1', porta), h); threading.Thread(target=s.serve_forever, daemon=True).start()
+    h = functools.partial(servidor_http.SimpleHTTPRequestHandler, directory=str(pasta)); h.log_message = lambda *a: None
+    s = servidor_http.ThreadingHTTPServer(('127.0.0.1', porta), h); threading.Thread(target=s.serve_forever, daemon=True).start()
 COPIA_CRM, COPIA_SITE = SAIDA / '_crm', SAIDA / '_site'
 copia(RAIZ, COPIA_CRM); copia(SITE, COPIA_SITE)
 servir(COPIA_CRM, 8777); servir(COPIA_SITE, 8788)
