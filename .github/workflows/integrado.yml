@@ -53,7 +53,7 @@ jobs:
           supabase start -x studio,imgproxy,logflare,vector
           supabase status
 
-      - name: Funções (crm-assistente e crm-google viram capturadores: nada sai)
+      - name: "Funções (crm-assistente e crm-google viram capturadores; nada sai)"
         run: |
           cp testes/integrado/stub_assistente.ts supabase/functions/crm-assistente/index.ts
           cp testes/integrado/stub_google.ts supabase/functions/crm-google/index.ts
