@@ -4,3 +4,7 @@ _mock/
 _mock.html
 testes/saida/
 __pycache__/
+relatorio/
+_site/
+funcoes.log
+supabase/.temp/

@@ -1,0 +1,77 @@
+# Teste integrado: sobe um Supabase TEMPORÁRIO dentro da máquina do GitHub (banco, login, API e funções),
+# aplica as migrações do CRM, serve o CRM e o site apontando para ele e percorre o ciclo inteiro no navegador.
+# Nenhum segredo é usado: o workflow não tem credencial de produção, e o roteiro para se encontrar alguma.
+name: Teste integrado (Supabase temporário)
+
+on:
+  push:
+    branches: [testes]
+  pull_request:
+    branches: [fluxo]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: integrado-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  integrado:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Site (mesmo ramo do CRM; se não existir, o fluxo)
+        run: |
+          R="${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}"
+          git clone --depth 1 --branch "$R" https://github.com/ZGroote/rovya-site.git _site \
+            || git clone --depth 1 --branch fluxo https://github.com/ZGroote/rovya-site.git _site
+          echo "site: $(git -C _site rev-parse --short HEAD) ($(git -C _site rev-parse --abbrev-ref HEAD))"
+
+      - name: Trava — nenhuma credencial ou endereço de produção no ambiente
+        run: |
+          if env | grep -E -i 'jgigosrsyxjqqhckudfe|SUPABASE_ACCESS_TOKEN|SUPABASE_DB_PASSWORD|SUPABASE_PROJECT_ID'; then
+            echo "::error::Credencial ou endereço de produção no ambiente. Teste interrompido."; exit 1; fi
+
+      - uses: supabase/setup-cli@v1
+        with:
+          version: 3.2.0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Playwright
+        run: pip install playwright==1.49.1 && python -m playwright install --with-deps chromium
+
+      - name: Supabase temporário (local na máquina do GitHub)
+        run: |
+          supabase init --force < /dev/null
+          supabase start -x studio,imgproxy,logflare,vector
+          supabase status
+
+      - name: Funções (a crm-assistente vira um capturador de avisos)
+        run: |
+          cp testes/integrado/stub_assistente.ts supabase/functions/crm-assistente/index.ts
+          nohup supabase functions serve --no-verify-jwt > funcoes.log 2>&1 &
+          for i in $(seq 90); do
+            c=$(curl -s -o /dev/null -w '%{http_code}' -X OPTIONS http://127.0.0.1:54321/functions/v1/crm-portal || true)
+            [ "$c" = "200" ] && echo "funções no ar" && break; sleep 2; done
+
+      - name: Teste integrado (CRM → site → aceite → contrato → projeto → portal)
+        run: python testes/integrado/rodar_integrado.py
+
+      - name: Relatório e evidências
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: relatorio-integrado
+          path: |
+            relatorio/*.md
+            relatorio/*.json
+            relatorio/*.png
+            funcoes.log
+          if-no-files-found: warn
