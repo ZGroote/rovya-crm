@@ -31,7 +31,7 @@ with sync_playwright() as p:
     # Funil
     pg.evaluate('window.__log.length = 0'); pg.goto(base + '#/funil'); pg.wait_for_timeout(700)
     ok(any(k == 'or' and 'etapa.not.in.(ganho,perdido),atualizado_em.gte.' in a[0] for k, a in log('crm_oportunidades')), 'funil: fechados/perdidos só dos últimos 3 meses')
-    ok('aparecem por 3 meses' in pg.inner_text('main'), 'funil explica o recorte')
+    ok('Fechados e perdidos ficam ocultos' in pg.inner_text('main') and 'últimos 3 meses' in pg.inner_text('main'), 'funil explica o recorte')
     # Projetos
     pg.evaluate('window.__log.length = 0'); pg.goto(base + '#/projetos'); pg.wait_for_timeout(600)
     ok(('neq', ['status', 'arquivado']) in log('crm_projetos'), 'projetos escondem os arquivados')

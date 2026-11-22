@@ -194,18 +194,22 @@ async function moverOportunidade(o, etapa, extra = {}) {
     if (!proj.length) await criarProjeto(o.cliente_id, o.titulo, o.id, o.valor);
   }
 }
+let funilEncerrados = false; // Fechado e Perdido: cartões ocultos até ela pedir (as colunas ficam, para arrastar para lá)
+const encerrada = k => k === 'ganho' || k === 'perdido';
 async function funil() {
   const ops = comPendentes('crm_oportunidades', await q(sb.from('crm_oportunidades').select('*,crm_clientes(nome,empresa)')
     .or(`etapa.not.in.(ganho,perdido),atualizado_em.gte.${mesesAtras(3)}`).order('ordem'))); // fechados e perdidos: só os dos últimos 3 meses (os antigos ficam na ficha do cliente)
-  main.innerHTML = `<div class="topo"><div><div class="eyebrow">Comercial</div><h1>Funil</h1><p>Arraste os cartões entre as colunas. Ao chegar em “Fechado”, o projeto é criado a partir do seu modelo. Fechados e perdidos aparecem por 3 meses; depois ficam na ficha do cliente.</p></div>
-    <button class="bt" id="nOp">+ Oportunidade</button></div>
+  main.innerHTML = `<div class="topo"><div><div class="eyebrow">Comercial</div><h1>Funil</h1><p>Arraste os cartões entre as colunas. Ao chegar em “Fechado”, o projeto é criado a partir do seu modelo. Fechados e perdidos ficam ocultos (“Mostrar encerrados” traz os dos últimos 3 meses); os antigos ficam na ficha do cliente.</p></div>
+    <div class="acoes">${ops.some(o => encerrada(o.etapa)) ? `<button class="bt sec" id="verEnc">${funilEncerrados ? 'Esconder encerrados' : `Mostrar encerrados (${ops.filter(o => encerrada(o.etapa)).length})`}</button>` : ''}<button class="bt" id="nOp">+ Oportunidade</button></div></div>
     <div class="funil">${ETAPAS_FUNIL.map(([k, l]) => {
-      const lst = ops.filter(o => o.etapa === k), tot = lst.reduce((s, o) => s + (Number(o.valor) || 0), 0);
+      const lst = ops.filter(o => o.etapa === k), tot = lst.reduce((s, o) => s + (Number(o.valor) || 0), 0), oculta = encerrada(k) && !funilEncerrados;
       return `<section class="col" data-etapa="${k}"><header><b>${l}</b><span>${lst.length}${tot ? ' · ' + brl(tot) : ''}</span></header>
-      ${lst.map(o => `<article class="op" draggable="true" data-id="${o.id}"><b>${esc(o.crm_clientes?.empresa || o.crm_clientes?.nome)}</b>${o.tipo_lead === 'ativo' ? ' <span class="pill" title="Prospecção ativa">ativo</span>' : ''}<small>${esc(o.titulo)}</small>
+      ${oculta && lst.length ? `<p class="mute" style="font-size:.78rem;margin:4px">${lst.length === 1 ? '1 cartão oculto' : lst.length + ' cartões ocultos'}</p>` : ''}
+      ${(oculta ? [] : lst).map(o => `<article class="op" draggable="true" data-id="${o.id}"><b>${esc(o.crm_clientes?.empresa || o.crm_clientes?.nome)}</b>${o.tipo_lead === 'ativo' ? ' <span class="pill" title="Prospecção ativa">ativo</span>' : ''}<small>${esc(o.titulo)}</small>
         ${o.valor ? `<span class="valor">${brl(o.valor)}</span>` : ''}${o.proximo_passo && !['ganho', 'perdido'].includes(k) ? `<small class="${venceu(o.proximo_em) ? 'atrasado' : ''}">→ ${esc(o.proximo_passo)} ${dataBR(o.proximo_em)}</small>` : ''}</article>`).join('')}</section>`;
     }).join('')}</div>`;
   $('#nOp').onclick = async () => { if (await novaOportunidade()) funil(); };
+  if ($('#verEnc')) $('#verEnc').onclick = () => { funilEncerrados = !funilEncerrados; funil(); };
   const porId = Object.fromEntries(ops.map(o => [o.id, o]));
   main.querySelectorAll('.op').forEach(el => {
     el.onclick = async () => { await editarOportunidade(porId[el.dataset.id]); funil(); };
@@ -223,6 +227,9 @@ async function funil() {
 }
 
 /* ---------- CLIENTES ---------- */
+// perfil do Instagram a partir do que estiver cadastrado (link, @perfil ou só o nome)
+const perfilInsta = v => { v = String(v || '').trim(); const m = v.match(/instagram\.com\/([A-Za-z0-9._]+)/i) || v.match(/^@?([A-Za-z0-9._]{1,30})$/); return m ? m[1] : null; };
+const valorFicha = (l, v) => l === 'Instagram' && perfilInsta(v) ? `<a href="https://www.instagram.com/${perfilInsta(v)}/" target="_blank" rel="noopener">@${esc(perfilInsta(v))}</a>` : esc(v);
 async function clientes() {
   const cs = await q(sb.from('crm_clientes').select('*,crm_projetos(status),crm_oportunidades(etapa)').order('nome'));
   main.innerHTML = `<div class="topo"><div><div class="eyebrow">Relacionamento</div><h1>Clientes</h1></div>
@@ -251,7 +258,7 @@ async function cliente(id) {
     <button class="bt sec" id="agendar">Agendar reunião</button><button class="bt sec" id="ed">Editar</button><button class="bt" id="nOp">+ Oportunidade</button></div></div>
   <div class="grade2">
     <section class="card"><h3>Dados</h3><ul class="lista">
-      ${[['Código', c.codigo], ['Razão social', c.razao_social], ['CNPJ/CPF', c.documento], ['E-mail', c.email], ['WhatsApp', c.telefone], ['Instagram', c.instagram], ['Origem', c.origem], ['Cliente desde', c.cliente_desde ? new Date(c.cliente_desde + 'T12:00').toLocaleDateString('pt-BR') : null], ['Primeiro contato', dataBR(c.criado_em.slice(0, 10))]].filter(x => x[1]).map(([l, v]) => `<li><span class="mute" style="min-width:110px">${l}</span><span>${esc(v)}</span></li>`).join('')}</ul>
+      ${[['Código', c.codigo], ['Razão social', c.razao_social], ['CNPJ/CPF', c.documento], ['E-mail', c.email], ['WhatsApp', c.telefone], ['Instagram', c.instagram], ['Origem', c.origem], ['Cliente desde', c.cliente_desde ? new Date(c.cliente_desde + 'T12:00').toLocaleDateString('pt-BR') : null], ['Primeiro contato', dataBR(c.criado_em.slice(0, 10))]].filter(x => x[1]).map(([l, v]) => `<li><span class="mute" style="min-width:110px">${l}</span><span>${valorFicha(l, v)}</span></li>`).join('')}</ul>
       ${c.notas ? `<p style="white-space:pre-wrap">${esc(c.notas)}</p>` : ''}</section>
     <section class="card"><h3>Projetos</h3><ul class="lista">${c.crm_projetos.map(p => `<li><a class="cresce" href="#/projeto/${p.id}"><b>${esc(p.nome)}</b></a><span class="pill">${rotulo(STATUS_PROJ, p.status)}</span></li>`).join('') || '<li class="vazio">Nenhum projeto.</li>'}</ul>
       <div class="acoes"><button class="bt peq sec" id="nProj">+ Projeto</button><button class="bt peq fantasma" id="impTrello">Importar do Trello</button></div></section>
