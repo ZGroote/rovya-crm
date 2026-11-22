@@ -36,7 +36,7 @@ with sync_playwright() as p:
     ok(all(f'Criar {rot.get(m, m)}' in txt for m in espera_meses), 'contrato mensal sem o mês: ' + ', '.join(espera_meses))
     ok((pg.locator('#todosMeses').count() == 1) == (len(espera_meses) > 1), 'botão "criar todos" só com mais de um mês')
     ok(f"{info['env']} peças esperando aprovação" in txt or f"{info['env']} peça esperando" in txt, 'peças enviadas há dias sem resposta: ' + str(info['env']))
-    ok('Lembrar no WhatsApp' in txt and 'sem acesso ao portal' in txt, 'oferece lembrar o cliente no WhatsApp')
+    ok('Lembrar o cliente' in txt and 'sem acesso ao portal' in txt, 'oferece lembrar o cliente (mesmo aviso do envio)')
     nrev = pg.evaluate("window.__D.crm_entregas.filter(x => x.status === 'revisao' && x.revisoes > 1).length")
     ok((f'{nrev} peças com ajuste além do combinado (contrato inclui 1)' if nrev > 1 else 'Ajuste além do combinado: 2ª rodada (contrato inclui 1)') in txt and txt.count('além do combinado') == 1, f'ajuste além do combinado: um aviso por projeto ({nrev} peças)')
     ok('Publicar hoje: ' + info['apr'] in txt, 'aprovado com data de hoje: publicar hoje')
@@ -57,8 +57,18 @@ with sync_playwright() as p:
     ok('preparar renovação' not in pg.inner_text('#cFluxo'), 'com a proposta de renovação deste contrato, o aviso some')
     pg.evaluate("() => { window.__D.crm_propostas = window.__D.crm_propostas.filter(p => !['ppx', 'ppr'].includes(p.id)); }")
     ok('Funil: próximos contatos' in pg.inner_text('#main'), 'o cartão antigo do funil continua, com nome novo')
-    href = pg.get_attribute('#cFluxo a[href*="wa.me"]', 'href')
-    ok('5516999990000' in href and 'portal' in href, 'WhatsApp vai para o telefone do cliente com o link do portal')
+    # lembrar: abre o mesmo aviso do envio (cliente com acesso ao portal → WhatsApp com o texto aprovado)
+    pg.evaluate("() => { window.__D.crm_portal = [{ cliente_id: 'c1', ultimo_acesso: null }]; }")
+    pg.route('**/wa.me/**', lambda r: r.abort())
+    pg.locator('#cFluxo li', has_text='esperando aprovação').locator('button').click(); pg.wait_for_selector('#dlgf .aviso [data-zap]')
+    with pg.expect_popup() as aba_zap: pg.click('#dlgf .aviso [data-zap]')
+    aba_zap.value.close()  # a aba do WhatsApp (bloqueada no teste) é fechada para o CRM voltar a ter o foco
+    href = pg.get_attribute('#dlgf .aviso [data-zap]', 'href')
+    ok('wa.me/5516999990000' in href and 'portal' in href and 'Temos' in pg.input_value('#dlgf .aviso [data-texto]') and pg.is_visible('#dlgf [data-sim]'),
+       'Lembrar o cliente: WhatsApp do cliente com a mensagem aprovada e o link do portal, e pergunta "Mandou?"')
+    pg.evaluate("() => { delete window.__D.crm_portal; }")
+    pg.click('#dlgf button[value=ok]'); pg.wait_for_function("!document.querySelector('#dlg').open")
+    pg.wait_for_timeout(2000)  # depois do aviso o Início se redesenha (2 vezes); espera assentar antes do próximo clique
 
     # criar contrato a partir da proposta aceita
     pg.locator('#cFluxo li', has_text='falta o contrato').locator('button').click(); pg.wait_for_selector('#dlg[open]')

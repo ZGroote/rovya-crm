@@ -143,6 +143,7 @@ ctx = nav.new_context(viewport={'width': 1280, 'height': 900}, locale='pt-BR', t
 def barra_producao(rota):
     bloqueados.append(rota.request.url); rota.abort()
 ctx.route(re.compile(PROD_REF), barra_producao)
+ctx.route(re.compile(r'wa\.me|api\.whatsapp\.com'), lambda r: r.abort())  # WhatsApp nunca abre de verdade no teste
 def nova_pagina():
     p = ctx.new_page(); p.set_default_timeout(25000)
     p.on('pageerror', lambda e: falhas_browser.append(f'{p.url}: {e}')); return p
@@ -488,6 +489,162 @@ def _():
     n = len(adm_sr('GET', f"crm_projetos?contrato_id=eq.{k['id']}&mes=eq.{MES}&select=id")[1])
     ok('DUP-03', 'Mês já criado (por outra aba): mensagem clara, sem termo técnico, e abre o projeto que já existe; um projeto só',
        'O projeto deste mês já existe para este contrato' in t and 'duplicate' not in t.lower() and n == 1, f'aviso="{t}" projetos={n}')
+
+# ---------- 11) A1: avisar o cliente quando há peça para aprovar (WhatsApp assistido) ----------
+def pecas(etapa_id, titulos, status='a_fazer'):
+    return [criar('crm_entregas', {'etapa_id': etapa_id, 'ordem': i + 1, 'titulo': t, 'status': status}, TA)['id'] for i, t in enumerate(titulos)]
+def peca(i): return um(f"crm_entregas?id=eq.{i}&select=status,texto,enviado_em,aviso_em,revisoes")
+def dialogo_aviso(): pg.wait_for_selector('#dlg[open] .aviso'); return pg.locator('#dlgf .aviso')
+def fechar_dialogo():
+    pg.click('#dlgf button[value=ok]'); pg.wait_for_function("!document.querySelector('#dlg').open"); pg.wait_for_timeout(1200)
+def secao(cid): return pg.locator(f'#dlgf .aviso[data-cliente="{cid}"]')
+def texto_secao(cid): return secao(cid).locator('[data-texto]').input_value()
+def abrir_zap(cid):
+    with pg.expect_popup() as aba: secao(cid).locator('[data-zap]').click()
+    aba.value.close(); return secao(cid).locator('[data-zap]').get_attribute('href')
+def avisos_hist(cliente): return adm_sr('GET', f"crm_interacoes?cliente_id=eq.{cliente}&resumo=ilike.Aviso%20de%20aprova*&select=id,resumo,operacao")[1]
+def no_projeto(pid):
+    pg.goto('about:blank'); pg.goto(CRM + f'/app.html#/projeto/{pid}'); pg.wait_for_selector('select[data-status]')
+def na_producao():
+    pg.goto('about:blank'); pg.goto(CRM + '/app.html#/producao'); pg.wait_for_selector('.col')
+def bypass_datas(sql):  # SÓ NO TESTE: simula o tempo passando (o gatilho protege essas datas de qualquer edição)
+    psql(f"begin; alter table public.crm_entregas disable trigger crm_entrega; {sql}; alter table public.crm_entregas enable trigger crm_entrega; commit;")
+A1 = {}
+
+@etapa('A1-00', 'Preparação do A1')
+def _():
+    et2 = criar('crm_etapas', {'projeto_id': ctx_c['pid'], 'ordem': 2, 'titulo': 'Semana 02'}, TA)['id']
+    guia = criar('crm_etapas', {'projeto_id': ctx_c['pid'], 'ordem': 3, 'titulo': 'Guia de Publicação', 'consulta': True}, TA)['id']
+    A1.update(zip(['a1', 'a2', 'a3', 'a4a', 'a4b', 'a5', 'a9b'], pecas(et2, ['Post A1 ficha do projeto', 'Post A2 ficha da peça', 'Post A3 arrastar', 'Lote A 1', 'Lote A 2', 'Lote misto A', 'Post rodada antiga'])))
+    A1['a7'] = pecas(guia, ['Como usar o portal'])[0]
+    pjB = criar('crm_projetos', {'cliente_id': cliB['id'], 'nome': 'Conteúdo B'}, TA)['id']; etB = criar('crm_etapas', {'projeto_id': pjB, 'ordem': 1, 'titulo': 'Semana 01'}, TA)['id']
+    A1['b5'] = pecas(etB, ['Lote misto B'])[0]
+    cliC = criar('crm_clientes', {'nome': 'Carla Sem Portal', 'empresa': 'Empresa C', 'telefone': '(16) 90000-0003'}, TA); A1['cliC'] = cliC['id']
+    pjC = criar('crm_projetos', {'cliente_id': cliC['id'], 'nome': 'Conteúdo C'}, TA)['id']; etC = criar('crm_etapas', {'projeto_id': pjC, 'ordem': 1, 'titulo': 'Semana 01'}, TA)['id']
+    A1['c6'], A1['pjC'] = pecas(etC, ['Post C'])[0], pjC
+    A1['hist0'] = len(avisos_hist(cliA['id']))
+    ok('A1-00', 'Peças fictícias de A, B (sem telefone) e C (sem acesso ao portal) prontas', True)
+
+@etapa('A1-01', 'Enviado pela ficha do projeto')
+def _():
+    no_projeto(ctx_c['pid']); pg.select_option(f'select[data-status="{A1["a1"]}"]', 'enviado'); dialogo_aviso()
+    t = texto_secao(cliA['id']); x = peca(A1['a1'])
+    ok('A1-01', 'Ficha do projeto: peça salva como Enviado e o aviso é oferecido com a mensagem aprovada',
+       x['status'] == 'enviado' and x['enviado_em'] and 'Oi, Ana! 😊' in t and 'Temos 1 conteúdo novo esperando sua aprovação.' in t and '• Post A1 ficha do projeto' in t
+       and 'https://rovyacreative.com.br/portal' in t and 'seguirmos com a programação' in t, t.replace('\n', ' / ')[:200])
+    foto('10_aviso_whatsapp')
+    href = abrir_zap(cliA['id'])
+    x = peca(A1['a1'])
+    ok('A1-13', 'WhatsApp não abre (bloqueado): a peça continua Enviado e nada é registrado', 'wa.me/5516900000001' in href and x['status'] == 'enviado'
+       and len(avisos_hist(cliA['id'])) == A1['hist0'] and not x['aviso_em'], href[:80])
+    secao(cliA['id']).locator('[data-nao]').click(); fechar_dialogo()
+    ok('A1-10', '"Mandou?" → Ainda não: nenhum envio registrado, aviso_em vazio', len(avisos_hist(cliA['id'])) == A1['hist0'] and not peca(A1['a1'])['aviso_em'])
+
+@etapa('A1-02', 'Enviado pela ficha da peça')
+def _():
+    no_projeto(ctx_c['pid']); pg.click(f'[data-abrir="{A1["a2"]}"]'); pg.wait_for_selector('#dlgf [name=texto]')
+    pg.select_option('#dlgf [name=status]', 'enviado'); pg.fill('#dlgf [name=texto]', 'Legenda nova A2'); pg.fill('#dlgf [name=link]', 'https://canva.com/a2')
+    pg.click('#dlgf button[value=ok]'); dialogo_aviso()
+    x = um(f"crm_entregas?id=eq.{A1['a2']}&select=status,texto,link,enviado_em")
+    ok('A1-02', 'Ficha da peça: texto, link e status gravados juntos e o aviso é oferecido', x['status'] == 'enviado' and x['texto'] == 'Legenda nova A2' and x['link'] == 'https://canva.com/a2'
+       and 'Post A2 ficha da peça' in texto_secao(cliA['id']), x)
+    fechar_dialogo(); A1['rodada_a2'] = x['enviado_em']
+    no_projeto(ctx_c['pid']); pg.click(f'[data-abrir="{A1["a2"]}"]'); pg.wait_for_selector('#dlgf [name=texto]')
+    pg.fill('#dlgf [name=texto]', 'Legenda revisada A2'); pg.click('#dlgf button[value=ok]'); pg.wait_for_timeout(1500)
+    y = peca(A1['a2'])
+    ok('A1-02b', 'Editar a peça que já está em Enviado: texto salvo, sem novo aviso e sem mexer no prazo (enviado_em igual)',
+       y['texto'] == 'Legenda revisada A2' and y['enviado_em'] == A1['rodada_a2'] and not pg.is_visible('#dlg[open] .aviso'), f"{y['enviado_em']} = {A1['rodada_a2']}")
+
+@etapa('A1-03', 'Arrastar na Produção')
+def _():
+    na_producao()
+    pg.evaluate("""id => { const dt = new DataTransfer(), op = document.querySelector(`.op[data-id="${id}"]`), col = document.querySelector('.col[data-status=enviado]');
+      op.dispatchEvent(new DragEvent('dragstart', { dataTransfer: dt, bubbles: true })); col.dispatchEvent(new DragEvent('drop', { dataTransfer: dt, bubbles: true })); }""", A1['a3'])
+    dialogo_aviso()
+    ok('A1-03', 'Arrastar para Enviado: aviso oferecido', peca(A1['a3'])['status'] == 'enviado' and 'Post A3 arrastar' in texto_secao(cliA['id']))
+    fechar_dialogo()
+
+@etapa('A1-04', 'Mover várias do mesmo cliente')
+def _():
+    na_producao(); pg.click('#selecionar'); pg.wait_for_selector('.barra-sel')
+    pg.click(f'.op[data-id="{A1["a4a"]}"]'); pg.click(f'.op[data-id="{A1["a4b"]}"]'); pg.select_option('#moverPara', 'enviado'); dialogo_aviso()
+    t = texto_secao(cliA['id'])
+    ok('A1-04', 'Mover 2 peças do mesmo cliente: uma mensagem só, com as duas', pg.locator('#dlgf .aviso').count() == 1 and 'Temos 2 conteúdos novos' in t and '• Lote A 1' in t and '• Lote A 2' in t, t.replace('\n', ' / ')[:160])
+    fechar_dialogo()
+
+@etapa('A1-05', 'Lote com dois clientes')
+def _():
+    na_producao(); pg.click('#selecionar'); pg.wait_for_selector('.barra-sel')
+    pg.click(f'.op[data-id="{A1["a5"]}"]'); pg.click(f'.op[data-id="{A1["b5"]}"]'); pg.select_option('#moverPara', 'enviado'); dialogo_aviso()
+    tA, tB = texto_secao(cliA['id']), texto_secao(cliB['id'])
+    ok('A1-05', 'Lote com dois clientes: duas mensagens, sem misturar títulos', pg.locator('#dlgf .aviso').count() == 2 and 'Lote misto A' in tA and 'Lote misto B' not in tA
+       and 'Lote misto B' in tB and 'Lote misto A' not in tB and tB.startswith('Oi, Bruno!'), '')
+    sb_ = secao(cliB['id'])
+    ok('A1-15', 'Cliente sem telefone: oferece e-mail no lugar do WhatsApp', sb_.locator('[data-email]').count() == 1 and sb_.locator('[data-zap]').count() == 0, sb_.locator('[data-email]').inner_text())
+    foto('11_aviso_dois_clientes')
+    sb_.locator('[data-email]').click(); pg.wait_for_function(f"""document.querySelector('#dlgf .aviso[data-cliente="{cliB['id']}"] [data-estado]').textContent.includes('Registrado')""")
+    em = adm_sr('GET', 'teste_emails?select=para,texto')[1]; hb = avisos_hist(cliB['id'])
+    ok('A1-15b', 'E-mail: sai pelo Gmail (capturado) e o aviso é registrado sem perguntar "Mandou?"',
+       len(em) == 1 and em[0]['para'] == cliB['email'] and 'Lote misto B' in em[0]['texto'] and len(hb) == 1 and 'por e-mail' in hb[0]['resumo'] and peca(A1['b5'])['aviso_em'], f'{em} {hb}')
+    fechar_dialogo()
+
+@etapa('A1-06', 'Cliente sem acesso ao portal')
+def _():
+    no_projeto(A1['pjC']); pg.select_option(f'select[data-status="{A1["c6"]}"]', 'enviado'); dialogo_aviso()
+    sc = secao(A1['cliC'])
+    ok('A1-06', 'Cliente sem acesso: oferece "Dar acesso ao portal" e não prepara link inútil', sc.locator('[data-acesso]').count() == 1 and sc.locator('[data-zap]').count() == 0
+       and sc.locator('[data-texto]').count() == 0 and peca(A1['c6'])['status'] == 'enviado', sc.inner_text()[:120])
+    fechar_dialogo()
+
+@etapa('A1-07', 'Item só de consulta')
+def _():
+    no_projeto(ctx_c['pid']); pg.select_option(f'select[data-status="{A1["a7"]}"]', 'enviado'); pg.wait_for_timeout(2500)
+    ok('A1-07', 'Cartão "só consulta" em Enviado: nenhum aviso', not pg.is_visible('#dlg[open] .aviso') and peca(A1['a7'])['status'] == 'enviado')
+
+@etapa('A1-08', 'Reenvio depois de ajuste e confirmação')
+def _():
+    no_projeto(ctx_c['pid']); pg.select_option(f'select[data-status="{ctx_c["e2"]}"]', 'enviado'); dialogo_aviso()
+    t = texto_secao(cliA['id'])
+    ok('A1-08', 'Peça reenviada depois da revisão: mensagem de ajustes', 'Fizemos os ajustes que você pediu em "Carrossel".' in t and 'A versão atualizada já está no portal' in t and 'Temos' not in t, t.replace('\n', ' / ')[:200])
+    op = secao(cliA['id']).get_attribute('data-op'); A1['op'] = op
+    abrir_zap(cliA['id']); secao(cliA['id']).locator('[data-sim]').click()
+    pg.wait_for_function(f"""document.querySelector('#dlgf .aviso[data-cliente="{cliA['id']}"] [data-estado]').textContent.includes('Registrado')""")
+    h = avisos_hist(cliA['id']); x = peca(ctx_c['e2'])
+    ok('A1-09', '"Mandou?" → Sim: registrado uma vez no histórico, com o código do aviso, e aviso_em marcado',
+       len(h) == A1['hist0'] + 1 and any(r['operacao'] == op for r in h) and x['aviso_em'] and 'WhatsApp' in h[-1]['resumo'], h[-1]['resumo'] if h else '')
+    fechar_dialogo()
+    s, j = rest('POST', 'rpc/crm_aviso_confirmar', {'p_operacao': op, 'p_cliente': cliA['id'], 'p_canal': 'whatsapp', 'p_itens': [{'id': ctx_c['e2'], 'rodada': x['enviado_em']}]}, TA)
+    ok('A1-14', 'Confirmar o mesmo aviso de novo: nada duplicado', s == 200 and j.get('ja') is True and len(avisos_hist(cliA['id'])) == A1['hist0'] + 1, f'{s} {j}')
+
+@etapa('A1-09b', 'Confirmação de rodada antiga')
+def _():
+    no_projeto(ctx_c['pid']); pg.select_option(f'select[data-status="{A1["a9b"]}"]', 'enviado'); dialogo_aviso()
+    rest('PATCH', f"crm_entregas?id=eq.{A1['a9b']}", {'status': 'revisao'}, TA); rest('PATCH', f"crm_entregas?id=eq.{A1['a9b']}", {'status': 'enviado'}, TA)  # rodada nova
+    antes = len(avisos_hist(cliA['id']))
+    abrir_zap(cliA['id']); secao(cliA['id']).locator('[data-sim]').click(); pg.wait_for_timeout(1500)
+    est = secao(cliA['id']).locator('[data-estado]').inner_text()
+    ok('A1-09b', 'Mensagem preparada antes de a peça mudar de rodada: a confirmação é recusada pelo banco e nada é registrado',
+       'Não registrado' in est and len(avisos_hist(cliA['id'])) == antes and not peca(A1['a9b'])['aviso_em'], est)
+    fechar_dialogo()
+
+@etapa('A1-11', 'Três dias sem aprovação')
+def _():
+    bypass_datas(f"update public.crm_entregas set enviado_em = now() - interval '5 days', aviso_em = null where id = '{ctx_c['e3']}'")
+    txt = inicio()
+    ok('A1-11', 'Peça em Enviado há 5 dias, sem aviso: o Início mostra a pendência', 'esperando aprovação há 5 dias' in txt and 'Empresa A' in txt, txt[:300])
+
+@etapa('A1-12', 'Reenviar a mensagem não esconde a pendência')
+def _():
+    bypass_datas(f"update public.crm_entregas set aviso_em = now() - interval '4 days' where id = '{ctx_c['e3']}'")
+    antes_aviso = peca(ctx_c['e3'])['aviso_em']; antes = len(avisos_hist(cliA['id']))
+    txt = inicio(); assert 'esperando aprovação' in txt, txt
+    pg.locator('#cFluxo li', has_text='esperando aprovação').filter(has_text='Empresa A').locator('button').click(); dialogo_aviso()
+    abrir_zap(cliA['id']); secao(cliA['id']).locator('[data-sim]').click()
+    pg.wait_for_function(f"""document.querySelector('#dlgf .aviso[data-cliente="{cliA['id']}"] [data-estado]').textContent.includes('Registrado')""")
+    fechar_dialogo()
+    depois_aviso = peca(ctx_c['e3'])['aviso_em']; txt = inicio()
+    ok('A1-12', 'Reenvio confirmado entra no histórico, mas não muda o prazo: a pendência antiga continua no Início',
+       depois_aviso == antes_aviso and len(avisos_hist(cliA['id'])) == antes + 1 and 'esperando aprovação' in txt and 'Empresa A' in txt, f'aviso_em {antes_aviso} → {depois_aviso}')
 
 # ---------- fim ----------
 ok('SEG-06', 'Nenhum pedido do navegador foi para produção', not bloqueados, bloqueados[:5])

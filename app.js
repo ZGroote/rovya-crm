@@ -6,6 +6,7 @@ import { documentos, cartaoDrive, ligarCartaoDrive } from './drive.js';
 import { cartaoPortal, ligarPortal } from './portal.js';
 import { mesDeConteudo, rotuloMes, proximoMes, importarTrello, rpcProjeto } from './conteudo.js';
 import { pendenciasFluxo, cartaoFluxo, ligarFluxo } from './fluxo.js';
+import { mudarStatus, prepararAviso } from './aviso.js';
 import { financeiro, abaFinanceiro } from './financeiro.js';
 import { configuracoes } from './configuracoes.js';
 import { relatorios } from './relatorios.js';
@@ -121,7 +122,7 @@ async function inicio() {
   $('#nCli').onclick = async () => { const c = await novoCliente(); if (c) location.hash = '#/cliente/' + c.id; };
   $('#nOp').onclick = async () => { if (await novaOportunidade()) location.hash = '#/funil'; };
   ligarLinhas($('#cTarefas'), tars, inicio);
-  ligarFluxo($('#cFluxo'), fluxo, inicio);
+  ligarFluxo($('#cFluxo'), fluxo, () => rotear()); // pelo rotear: se ela já foi para outra tela, o redesenho atrasado não cobre a tela nova
   // agenda de hoje (não bloqueia a tela)
   google('listar', { de: new Date(hoje() + 'T00:00').toISOString(), ate: new Date(hoje() + 'T23:59:59').toISOString() }).then(r => {
     const el = $('#agHoje'); if (!el) return;
@@ -375,7 +376,8 @@ async function projeto(id, aba = 'etapas') {
     </section>`).join('') + `<button class="bt sec" id="nEtapa">+ Etapa</button>`;
   const porEnt = Object.fromEntries(es.map(x => [x.id, x])), porEtapa = Object.fromEntries(p.crm_etapas.map(e => [e.id, e]));
   alvo.querySelectorAll('[data-status]').forEach(s => s.onchange = async () => {
-    await q(sb.from('crm_entregas').update({ status: s.value, atualizado_em: new Date().toISOString() }).eq('id', s.dataset.status)); toast(rotulo(STATUS_ENT, s.value)); projeto(id, aba);
+    try { await mudarStatus([s.dataset.status], s.value, null, { aviso: rotulo(STATUS_ENT, s.value) }); } catch { } // virou Enviado: oferece avisar o cliente
+    projeto(id, aba);
   });
   alvo.querySelectorAll('[data-abrir],.ent .t').forEach(b => b.onclick = () => abrirEntrega(porEnt[b.dataset.abrir || b.closest('[data-ent]').dataset.ent], p).then(() => projeto(id, aba)));
   alvo.querySelectorAll('[data-copiar]').forEach(b => b.onclick = () => { navigator.clipboard.writeText(mdTexto(preencher(porEtapa[b.dataset.copiar].orientacao, c))); toast('Texto copiado'); });
@@ -417,7 +419,7 @@ async function abrirEntrega(x, p) {
   const v = await pr;
   if ($('#dlg').returnValue === 'apagar') { if (await confirma(`Apagar a entrega “${x.titulo}”? Os arquivos dela também são apagados.`)) await apagarEntregas([x.id]); return; }
   if (!v) return;
-  await q(sb.from('crm_entregas').update({ ...v, atualizado_em: new Date().toISOString() }).eq('id', x.id));
+  const mudou = await mudarStatus([x.id], v.status, v, { avisar: false }); // todos os campos do formulário numa gravação só
   for (const f of arquivos.files) {
     const caminho = `${p.id}/${x.id}/${Date.now()}-${f.name.normalize('NFD').replace(/[^\w.-]+/g, '_')}`;
     toast('Enviando ' + f.name + '…');
@@ -425,6 +427,7 @@ async function abrirEntrega(x, p) {
     await q(sb.from('crm_anexos').insert({ entrega_id: x.id, nome: f.name, caminho, tamanho: f.size }));
   }
   toast('Entrega salva');
+  if (mudou.viraram.length) await prepararAviso(mudou.viraram, mudou.anterior); // depois dos anexos: o cliente já encontra tudo no portal
 }
 /* ---------- ENCERRAMENTO (Manual Mestre: pendências → exportar entregáveis → retenção → arquivar) ---------- */
 async function encerrarProjeto(p) {

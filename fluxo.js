@@ -6,6 +6,7 @@ import { sb, esc, hoje, diaLocal, dataBR, q } from './util.js';
 import { novoContrato, mesesQueFaltam } from './contratos.js';
 import { novaProposta } from './comercial.js';
 import { criarMesDoContrato, rotuloMes } from './conteudo.js';
+import { prepararAviso } from './aviso.js';
 
 const JANELA = 120;              // dias: proposta aprovada / funil fechado mais antigos que isso não aparecem
 const ESPERA_APROVACAO = 3;      // dias com peça enviada sem resposta do cliente
@@ -13,7 +14,6 @@ const nome = c => c?.empresa || c?.nome || 'Rovya';
 const dias = ts => Math.floor((Date.now() - new Date(ts)) / 864e5);
 // criarProjeto mora no app.js: pede por evento e espera o formulário terminar (o app.js põe a promessa em detail.pronto)
 const criarProjeto = d => { dispatchEvent(new CustomEvent('crm:criar-projeto', { detail: d })); return d.pronto; };
-const zap = (c, texto) => `https://wa.me/${c?.telefone ? c.telefone.replace(/\D/g, '').replace(/^(?!55)/, '55') : ''}?text=${encodeURIComponent(texto)}`;
 
 export async function pendenciasFluxo() {
   const desde = diaLocal(-JANELA);
@@ -22,7 +22,7 @@ export async function pendenciasFluxo() {
     q(sb.from('crm_contratos').select('id,titulo,tipo,status,cliente_id,proposta_id,projeto_id,posts_mes,ajustes_inclusos,valor_mensal,valor_avulso,inicio,fim,aviso_dias,crm_clientes(id,nome,empresa)').in('status', ['rascunho', 'assinatura', 'vigente'])),
     q(sb.from('crm_projetos').select('id,cliente_id,oportunidade_id,contrato_id,mes,status').neq('status', 'arquivado')),
     q(sb.from('crm_oportunidades').select('id,titulo,cliente_id,valor,etapa,fechado_em,crm_clientes(id,nome,empresa)').eq('etapa', 'ganho').gte('fechado_em', desde)),
-    q(sb.from('crm_entregas').select('id,titulo,status,prazo,revisoes,atualizado_em,crm_etapas!inner(consulta,crm_projetos!inner(id,nome,status,cliente_id,contrato_id,crm_clientes(id,nome,empresa,telefone)))')
+    q(sb.from('crm_entregas').select('id,titulo,status,prazo,revisoes,atualizado_em,enviado_em,aviso_em,enviado_aprox,crm_etapas!inner(consulta,crm_projetos!inner(id,nome,status,cliente_id,contrato_id,crm_clientes(id,nome,empresa,telefone)))')
       .in('status', ['enviado', 'revisao', 'aprovado']).eq('crm_etapas.crm_projetos.status', 'ativo')),
     sb.from('crm_portal').select('cliente_id,ultimo_acesso').then(r => r.data || [], () => []),
   ]);
@@ -51,15 +51,17 @@ export async function pendenciasFluxo() {
     out.push({ icone: '▤', titulo: `Criar ${rotuloMes(m)}`, sub: `${nome(k.crm_clientes)} · ${k.posts_mes} posts · ${k.titulo}`, botao: 'Criar mês',
       fazer: async () => { location.hash = '#/projeto/' + await criarMesDoContrato(k, m); }, mes: m, contrato: k });
 
-  // 5) cliente sem aprovar há dias (por cliente), com o último acesso ao portal
-  const paraCliente = ents.filter(x => x.status === 'enviado' && !x.crm_etapas.consulta && x.crm_etapas.crm_projetos.cliente_id && dias(x.atualizado_em) >= ESPERA_APROVACAO);
+  // 5) cliente sem aprovar há dias (por cliente), com o último acesso ao portal.
+  // Prazo: o primeiro aviso confirmado desta rodada ou, sem aviso, a entrada em Enviado. Editar a peça ou reenviar o aviso não zera.
+  const inicioRodada = x => x.enviado_em || x.atualizado_em, prazoDe = x => x.aviso_em || inicioRodada(x);
+  const paraCliente = ents.filter(x => x.status === 'enviado' && !x.crm_etapas.consulta && x.crm_etapas.crm_projetos.cliente_id && dias(prazoDe(x)) >= ESPERA_APROVACAO);
   const porCliente = paraCliente.reduce((m, x) => ((m[x.crm_etapas.crm_projetos.cliente_id] ||= []).push(x), m), {});
   for (const [cid, xs] of Object.entries(porCliente)) {
     const c = xs[0].crm_etapas.crm_projetos.crm_clientes, acesso = acessos.filter(a => a.cliente_id === cid).map(a => a.ultimo_acesso).filter(Boolean).sort().at(-1);
-    const n = xs.length, maior = Math.max(...xs.map(x => dias(x.atualizado_em)));
-    out.push({ icone: '⏳', titulo: `${n} ${n > 1 ? 'peças esperando' : 'peça esperando'} aprovação há ${maior} dias`,
+    const n = xs.length, maior = Math.max(...xs.map(x => dias(inicioRodada(x)))), aprox = xs.some(x => x.enviado_aprox || !x.enviado_em);
+    out.push({ icone: '⏳', titulo: `${n} ${n > 1 ? 'peças esperando' : 'peça esperando'} aprovação há ${maior} dias${aprox ? ' (data aproximada)' : ''}`,
       sub: `${nome(c)} · ${acesso ? `entrou no portal ${dias(acesso) ? `há ${dias(acesso)} dia(s)` : 'hoje'}` : acessos.some(a => a.cliente_id === cid) ? 'ainda não entrou no portal' : 'sem acesso ao portal'}`,
-      botao: 'Lembrar no WhatsApp', href: zap(c, `Oi, ${(c?.nome || '').split(' ')[0]}! Tem ${n} conteúdo(s) esperando a sua aprovação no portal: https://rovyacreative.com.br/portal`) });
+      botao: 'Lembrar o cliente', fazer: () => prepararAviso(xs.map(x => x.id)) }); // mesmo aviso do envio; reenviar não zera o prazo
   }
 
   // 6) ajuste além do combinado (peça ainda em andamento que passou das rodadas do contrato)

@@ -15,3 +15,10 @@ create table if not exists public.teste_avisos(
   quando timestamptz not null default now(),
   titulo text, corpo text, url text);
 alter table public.teste_avisos enable row level security; -- só o service role (o teste) lê
+
+-- capturador de e-mails: a crm-google de teste grava aqui em vez de mandar pelo Gmail
+create table if not exists public.teste_emails(
+  id bigint generated always as identity primary key,
+  quando timestamptz not null default now(),
+  para text, assunto text, texto text);
+alter table public.teste_emails enable row level security;

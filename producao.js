@@ -2,6 +2,7 @@
 import { sb, $, main, esc, dataBR, diaLocal, venceu, toast, q, rotulo, confirma } from './util.js';
 import { usoEscopo, textoUso, mesAtual } from './contratos.js';
 import { rotuloMes } from './conteudo.js';
+import { mudarStatus } from './aviso.js';
 
 export const STATUS_ENT = [['a_fazer', 'A fazer'], ['produzindo', 'Em produção'], ['enviado', 'Enviado'], ['revisao', 'Em revisão'], ['aprovado', 'Aprovado']];
 export const FORMATOS = ['Post feed', 'Carrossel', 'Reels / vídeo', 'Stories', 'PDF / documento', 'Apresentação', 'Logo / identidade', 'Texto', 'Impresso', 'Site / página'];
@@ -67,8 +68,8 @@ export async function producao(abrirEntrega, projetoId = '', sel = null) {
     col.ondrop = async e => {
       e.preventDefault(); col.classList.remove('sobre');
       const x = porId[e.dataTransfer.getData('text/plain')]; if (!x || x.status === col.dataset.status) return;
-      await q(sb.from('crm_entregas').update({ status: col.dataset.status, atualizado_em: new Date().toISOString() }).eq('id', x.id));
-      toast(rotulo(STATUS_ENT, col.dataset.status)); recarregar();
+      try { await mudarStatus([x.id], col.dataset.status, null, { aviso: rotulo(STATUS_ENT, col.dataset.status) }); } catch { }
+      recarregar();
     };
   });
 }
@@ -91,7 +92,7 @@ function ligarSelecao(sel, vis, sair) {
   $('#sairSel').onclick = sair;
   $('#moverPara').onchange = async e => {
     const st = e.target.value; if (!st || !sel.size) return;
-    try { await q(sb.from('crm_entregas').update({ status: st, atualizado_em: new Date().toISOString() }).in('id', [...sel])); toast(`${sel.size} peça(s) em ${rotulo(STATUS_ENT, st)}`); } catch { }
+    try { await mudarStatus([...sel], st, null, { aviso: `${sel.size} peça(s) em ${rotulo(STATUS_ENT, st)}` }); } catch { } // virou Enviado: um aviso por cliente
     sair();
   };
   $('#apagarSel').onclick = async () => {

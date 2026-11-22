@@ -53,9 +53,10 @@ jobs:
           supabase start -x studio,imgproxy,logflare,vector
           supabase status
 
-      - name: Funções (a crm-assistente vira um capturador de avisos)
+      - name: Funções (crm-assistente e crm-google viram capturadores: nada sai)
         run: |
           cp testes/integrado/stub_assistente.ts supabase/functions/crm-assistente/index.ts
+          cp testes/integrado/stub_google.ts supabase/functions/crm-google/index.ts
           nohup supabase functions serve --no-verify-jwt > funcoes.log 2>&1 &
           for i in $(seq 90); do
             c=$(curl -s -o /dev/null -w '%{http_code}' -X OPTIONS http://127.0.0.1:54321/functions/v1/crm-portal || true)
