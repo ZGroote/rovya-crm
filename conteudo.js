@@ -40,11 +40,23 @@ export function mesDeConteudo(mes, cliente, posts = null) {
     { titulo: 'Guia de Publicação', consulta: true, entregas: [{ titulo: 'Como usar o portal', texto: COMO_USAR }, 'Guia de Publicação'] },
   ];
 }
+// cria o projeto pelo banco. O mesmo mês duas vezes no mesmo contrato (o banco recusa) vira uma mensagem clara e abre o
+// projeto que já existe; qualquer outro erro do banco aparece como veio.
+export async function rpcProjeto(args) {
+  const { data, error } = await sb.rpc('crm_projeto_de_modelo', args);
+  if (!error) return data;
+  if (error.code === '23505' && args.p_contrato && args.p_mes) {
+    toast('O projeto deste mês já existe para este contrato. Abrindo o projeto existente.', true);
+    const [j] = await q(sb.from('crm_projetos').select('id').eq('contrato_id', args.p_contrato).eq('mes', args.p_mes));
+    if (j) location.hash = '#/projeto/' + j.id;
+  } else toast(semRede(error) ? 'Sem internet: isso não foi salvo. Tente de novo quando a conexão voltar.' : error.message, true);
+  throw error;
+}
 // cria o projeto do mês de um contrato mensal (contrato + mês ficam gravados; o banco não deixa criar o mesmo mês duas vezes)
 export async function criarMesDoContrato(k, mes) {
   const c = k.crm_clientes, nome = `${c?.empresa || c?.nome || 'Rovya'} · ${rotuloMes(mes)}`, [a, m] = mes.split('-').map(Number);
-  const pid = await q(sb.rpc('crm_projeto_de_modelo', { p_cliente: k.cliente_id, p_nome: nome, p_modelo: null, p_estrutura: mesDeConteudo(mes, c, k.posts_mes),
-    p_contrato: k.id, p_mes: mes, p_valor: k.valor_mensal ?? null, p_entrega: `${mes}-${dd(new Date(a, m, 0).getDate())}` })); // entrega = último dia do mês
+  const pid = await rpcProjeto({ p_cliente: k.cliente_id, p_nome: nome, p_modelo: null, p_estrutura: mesDeConteudo(mes, c, k.posts_mes),
+    p_contrato: k.id, p_mes: mes, p_valor: k.valor_mensal ?? null, p_entrega: `${mes}-${dd(new Date(a, m, 0).getDate())}` }); // entrega = último dia do mês
   toast(`${rotuloMes(mes)} criado para ${c?.empresa || c?.nome}`);
   return pid;
 }

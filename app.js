@@ -4,7 +4,7 @@ import { servicos, servico, propostas, proposta, novaProposta, propostasDoClient
 import { contratos, contrato, novoContrato, alertasContratos, contratosDoCliente } from './contratos.js';
 import { documentos, cartaoDrive, ligarCartaoDrive } from './drive.js';
 import { cartaoPortal, ligarPortal } from './portal.js';
-import { mesDeConteudo, rotuloMes, proximoMes, importarTrello } from './conteudo.js';
+import { mesDeConteudo, rotuloMes, proximoMes, importarTrello, rpcProjeto } from './conteudo.js';
 import { pendenciasFluxo, cartaoFluxo, ligarFluxo } from './fluxo.js';
 import { financeiro, abaFinanceiro } from './financeiro.js';
 import { configuracoes } from './configuracoes.js';
@@ -313,8 +313,8 @@ async function criarProjeto(clienteId, nome, oportunidadeId = null, valor = null
     estrutura = mesDeConteudo(m.mes, c, k?.posts_mes); v.modelo = null;
     if (!v.nome.includes(rotuloMes(m.mes))) v.nome += ' · ' + rotuloMes(m.mes);
   }
-  const pid = await q(sb.rpc('crm_projeto_de_modelo', { p_cliente: clienteId, p_nome: v.nome, p_modelo: v.modelo, p_oportunidade: oportunidadeId, p_estrutura: estrutura,
-    p_contrato: contratoId, p_mes: mes, p_valor: v.valor, p_entrega: v.entrega_prevista }));
+  const pid = await rpcProjeto({ p_cliente: clienteId, p_nome: v.nome, p_modelo: v.modelo, p_oportunidade: oportunidadeId, p_estrutura: estrutura,
+    p_contrato: contratoId, p_mes: mes, p_valor: v.valor, p_entrega: v.entrega_prevista });
   toast('Projeto criado'); location.hash = '#/projeto/' + pid; return pid;
 }
 async function projetos(arquivados) {

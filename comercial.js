@@ -1,6 +1,5 @@
 // comercial: catálogo de serviços e propostas versionadas (tabelas crm_servicos e crm_propostas)
 import { sb, $, main, esc, brl, hoje, diaLocal, dataBR, venceu, toast, q, rotulo, preencher, mdHtml, formulario, confirma, listaClientes, opcoesClientes, anexosGrandes } from './util.js';
-import { novoContrato } from './contratos.js';
 import { enviarAoDrive, pastaDoCliente, linhaDoc } from './drive.js';
 
 const STATUS_PROP = [['rascunho', 'Rascunho'], ['enviada', 'Enviada'], ['aprovada', 'Aprovada'], ['recusada', 'Recusada']];
@@ -220,7 +219,7 @@ export async function proposta(id) {
       <div class="acoes"><input class="busca" id="linkProp" readonly value="${esc(LINK_PROPOSTA + p.token)}" style="flex:1;min-width:220px"><button class="bt peq sec" id="copiarLink">Copiar</button>
       <a class="bt peq sec" target="_blank" rel="noopener" href="${esc(zap(c, `Oi, ${(c.nome || '').split(' ')[0]}! Segue a proposta “${p.titulo}”. Por este link você lê tudo e, se estiver de acordo, aceita por ali mesmo: ${LINK_PROPOSTA + p.token}`))}">WhatsApp</a>
       <a class="bt peq fantasma" target="_blank" rel="noopener" href="${esc(LINK_PROPOSTA + p.token)}">Abrir ↗</a></div></section>` : ''}
-    <div class="acoes" style="margin-bottom:18px">${ro ? '' : proximosProp(p).map(st => `<button class="bt peq sec" data-st="${st}">${BOTAO_ST[st]}</button>`).join('')}
+    <div class="acoes" style="margin-bottom:18px">${ro ? '' : proximosProp(p).map(st => `<button class="bt peq sec" data-st="${st}">${st === 'enviada' && p.status !== 'rascunho' ? 'Reabrir (volta a enviada)' : BOTAO_ST[st]}</button>`).join('')}
       <button class="bt peq fantasma" id="apagar" style="color:var(--bad)">Apagar esta versão</button></div>
     <section class="card" style="margin-bottom:18px"><div class="topo" style="margin-bottom:6px;align-items:center"><h3>Itens</h3>${ro ? '' : '<div class="acoes"><button class="bt peq sec" id="doCat">+ Do catálogo</button><button class="bt peq sec" id="livre">+ Item livre</button></div>'}</div>
       <table><thead><tr><th>Serviço</th><th class="dir">Qtd</th><th class="dir esconde-cel">Valor</th><th class="dir">Subtotal</th></tr></thead><tbody id="itens"></tbody><tfoot id="tot"></tfoot></table></section>
@@ -283,12 +282,24 @@ export async function proposta(id) {
     };
   }
 
+  // status muda só pelo banco (crm_proposta_decidir, 025): proposta e funil numa transação. Aprovar fecha o funil e NÃO cria
+  // contrato (ele aparece em Próximos passos, como no aceite online); recusar pede o motivo, que vai para o cartão do funil;
+  // reabrir mexe só na proposta. Oportunidade já encerrada de outro jeito: o banco recusa e a mensagem aparece.
   const mudar = async st => {
     await salvar();
-    try { await q(sb.from('crm_propostas').update({ status: st, ...(st === 'enviada' && { enviada_em: hoje() }) }).eq('id', id)); } catch { return proposta(id); } // o banco recusa passagem errada (a mensagem aparece)
-    toast('Proposta ' + rotulo(STATUS_PROP, st).toLowerCase());
-    if (st === 'aprovada' && await confirma('Criar o contrato agora?')
-      && await novoContrato({ cliente_id: c.id, proposta_id: id, titulo: p.titulo, valor_avulso: p.valor })) return; // contratos.js navega sozinho
+    let motivo = null;
+    if (st === 'recusada') {
+      const v = await formulario('Recusar a proposta', [{ k: 'motivo', l: 'Motivo da recusa (fica no cartão do funil)', t: 'textarea', linhas: 3, req: true }], {}, '', 'Recusar');
+      if (!v) return proposta(id);
+      motivo = v.motivo;
+    }
+    try {
+      const r = await q(sb.rpc('crm_proposta_decidir', { p_proposta: id, p_status: st, p_motivo: motivo }));
+      toast(r?.ja ? 'Nada mudou: a proposta já estava assim.'
+        : st === 'aprovada' ? `Proposta aprovada${r?.funil_alterado ? ' e funil em Fechado' : ''}. O contrato aparece em Próximos passos, no Início.`
+        : st === 'recusada' ? `Proposta recusada${r?.funil_alterado ? ' e funil em Perdido' : ''}.`
+        : p.status === 'rascunho' ? 'Proposta enviada' : 'Proposta reaberta. O funil não foi alterado.');
+    } catch { } // a mensagem do banco já apareceu
     proposta(id);
   };
   $('#st').onchange = e => mudar(e.target.value);

@@ -8,7 +8,7 @@
 # Uso (no workflow): supabase start → functions serve → python testes/integrado/rodar_integrado.py
 import os, sys, json, re, shutil, subprocess, threading, datetime, pathlib, functools, traceback, concurrent.futures
 import http.server as servidor_http
-import urllib.request, urllib.error
+import urllib.request, urllib.error, urllib.parse
 
 RAIZ = pathlib.Path(__file__).resolve().parents[2]
 SITE = pathlib.Path(os.environ.get('SITE_DIR', RAIZ / '_site'))
@@ -98,6 +98,8 @@ def entrar(email, senha):
     s, j = http('POST', f'{API}/auth/v1/token?grant_type=password', {'email': email, 'password': senha}); assert s == 200, (s, j); return j['access_token']
 def criar(tabela, linha, token):
     s, j = rest('POST', tabela, linha, token); assert s == 201, (tabela, s, j); return j[0]
+def decidir(pid, status, motivo=None, token=None):
+    return rest('POST', 'rpc/crm_proposta_decidir', {'p_proposta': pid, 'p_status': status, 'p_motivo': motivo}, token or TA)
 def avisos(titulo_parte):
     s, j = adm_sr('GET', 'teste_avisos?select=titulo'); return [a['titulo'] for a in j if titulo_parte in a['titulo']]
 
@@ -293,7 +295,7 @@ def _():
 # ---------- 7) validade do link ----------
 def proposta_enviada(cliente, titulo, validade=dia(10), extra=None):
     p = criar('crm_propostas', {'cliente_id': cliente, 'titulo': titulo, 'valor': 100, 'validade': validade, **(extra or {})}, TA)
-    rest('PATCH', f"crm_propostas?id=eq.{p['id']}", {'status': 'enviada'}, TA)
+    s_, j_ = decidir(p['id'], 'enviada'); assert s_ == 200, (s_, j_)
     return um(f"crm_propostas?id=eq.{p['id']}&select=id,grupo,token,status")
 @etapa('VER', 'Links de proposta inválidos, vencidos, recusados ou antigos')
 def _():
@@ -303,17 +305,17 @@ def _():
     p = proposta_enviada(cliB['id'], 'Vencida'); rest('PATCH', f"crm_propostas?id=eq.{p['id']}", {'validade': dia(-1)}, TA)
     s, j = fn('crm-proposta', {'acao': 'aceitar', 'token': p['token'], 'nome': 'Bruno Teste'}, chave=None)
     ok('VER-01', 'Proposta vencida: aceite bloqueado e proposta continua enviada', s == 409 and um(f"crm_propostas?id=eq.{p['id']}&select=status")['status'] == 'enviada', f'{s} {j}')
-    p = proposta_enviada(cliB['id'], 'Recusada'); rest('PATCH', f"crm_propostas?id=eq.{p['id']}", {'status': 'recusada'}, TA)
+    p = proposta_enviada(cliB['id'], 'Recusada'); decidir(p['id'], 'recusada', 'Cliente achou caro')
     s, j = fn('crm-proposta', {'acao': 'aceitar', 'token': p['token'], 'nome': 'Bruno Teste'}, chave=None)
     ok('VER-02', 'Proposta recusada: aceite bloqueado', s == 409 and um(f"crm_propostas?id=eq.{p['id']}&select=status")['status'] == 'recusada', f'{s} {j}')
     p1 = proposta_enviada(cliB['id'], 'Versionada')
     v2 = criar('crm_propostas', {'grupo': p1['grupo'], 'versao': 2, 'cliente_id': cliB['id'], 'titulo': 'Versionada', 'valor': 120, 'validade': dia(10)}, TA)
-    rest('PATCH', f"crm_propostas?id=eq.{v2['id']}", {'status': 'enviada'}, TA); t2 = um(f"crm_propostas?id=eq.{v2['id']}&select=token")['token']
+    decidir(v2['id'], 'enviada'); t2 = um(f"crm_propostas?id=eq.{v2['id']}&select=token")['token']
     s, j = fn('crm-proposta', {'acao': 'aceitar', 'token': p1['token'], 'nome': 'Bruno Teste'}, chave=None)
     sv, jv = fn('crm-proposta', {'acao': 'ver', 'token': p1['token']}, chave=None)
     s2, j2 = fn('crm-proposta', {'acao': 'aceitar', 'token': t2, 'nome': 'Bruno Teste'}, chave=None)
     ok('VER-04', 'Versão substituída não pode ser aceita; a nova pode', s == 409 and jv.get('atualizada') is True and s2 == 200 and t2 != p1['token'], f'v1: {s} {j} · v2: {s2}')
-    s, j = rest('PATCH', f"crm_propostas?id=eq.{v2['id']}", {'status': 'enviada'}, TA)
+    s, j = decidir(v2['id'], 'enviada')
     ok('CTR-P2', 'Proposta aceita online não volta para enviada', s >= 400 and um(f"crm_propostas?id=eq.{v2['id']}&select=status")['status'] == 'aprovada', f'{s} {j}')
 
 # ---------- 8) renovação no Início ----------
@@ -327,7 +329,7 @@ def _():
     ok('CTR-04b', 'Proposta de OUTRO serviço do mesmo cliente não esconde a renovação', tem(inicio()))
     rn = criar('crm_propostas', {'cliente_id': cliB['id'], 'titulo': 'Renovação · Gestão B', 'valor': 900, 'validade': dia(10), 'renova_contrato': k['id']}, TA)
     ok('CTR-04c', 'Com a proposta de renovação deste contrato, o aviso some', not tem(inicio()))
-    rest('PATCH', f"crm_propostas?id=eq.{rn['id']}", {'status': 'enviada'}, TA); rest('PATCH', f"crm_propostas?id=eq.{rn['id']}", {'status': 'recusada'}, TA)
+    decidir(rn['id'], 'enviada'); decidir(rn['id'], 'recusada', 'Cliente não vai renovar')
     ok('CTR-04d', 'Renovação recusada: o aviso volta', tem(inicio()))
     foto('07_crm_inicio_renovacao')
 
@@ -355,6 +357,136 @@ def _():
     n = len(adm_sr('GET', f"crm_projetos?contrato_id=eq.{k['id']}&mes=eq.{seg}&select=id")[1])
     ok('DUP-01', 'Criar o mesmo mês duas vezes ao mesmo tempo: uma passa, a outra é recusada, um projeto só',
        sorted(s for s, _ in rs)[0] == 200 and sorted(s for s, _ in rs)[1] >= 400 and n == 1, f'respostas={[s for s, _ in rs]} projetos={n} · {rs[1][1] if rs[1][0] >= 400 else rs[0][1]}')
+
+# ---------- 10) regras comerciais (A2): proposta e funil na mesma transação ----------
+def nova_op(cliente, titulo, etapa='negociacao'):
+    return criar('crm_oportunidades', {'cliente_id': cliente, 'titulo': titulo, 'etapa': etapa, 'valor': 2000}, TA)
+def hist(cliente, trecho):
+    return adm_sr('GET', f"crm_interacoes?cliente_id=eq.{cliente}&resumo=ilike.*{urllib.parse.quote(trecho)}*&select=id,resumo")[1]
+A2 = {}
+
+@etapa('REG-01', 'Status da proposta não muda direto no banco')
+def _():
+    p = proposta_enviada(cliA['id'], 'Direto')
+    s, j = rest('PATCH', f"crm_propostas?id=eq.{p['id']}", {'status': 'aprovada'}, TA)
+    ok('REG-01', 'Mudar o status da proposta direto no banco é recusado (só pela proposta, para o funil acompanhar)',
+       s >= 400 and 'pelos botões da proposta' in json.dumps(j, ensure_ascii=False) and um(f"crm_propostas?id=eq.{p['id']}&select=status")['status'] == 'enviada', f'{s} {j}')
+
+@etapa('A2-01', 'Aprovar a proposta à mão pela tela')
+def _():
+    op = nova_op(cliA['id'], 'Identidade visual'); p = proposta_enviada(cliA['id'], 'Identidade visual', extra={'oportunidade_id': op['id']})
+    A2.update(op1=op['id'], p1=p['id'])
+    pg.goto('about:blank'); pg.goto(CRM + f"/app.html#/proposta/{p['id']}"); pg.wait_for_selector('[data-st=aprovada]')
+    pg.click('[data-st=aprovada]'); pg.wait_for_function("!document.querySelector('[data-st=aprovada]')")
+    pg.wait_for_timeout(500)
+    sem_dialogo = not pg.is_visible('#dlg[open]')
+    pr = um(f"crm_propostas?id=eq.{p['id']}&select=status,aceite_em")
+    o = um(f"crm_oportunidades?id=eq.{op['id']}&select=etapa,fechado_em")
+    ks = adm_sr('GET', f"crm_contratos?proposta_id=eq.{p['id']}&select=id")[1]
+    pj = adm_sr('GET', f"crm_projetos?oportunidade_id=eq.{op['id']}&select=id")[1]
+    h = hist(cliA['id'], 'Identidade visual” (v1) aprovada')
+    ok('A2-01', 'Aprovar à mão: proposta aprovada e funil em Fechado na mesma operação; nenhum contrato ou projeto criado; histórico',
+       pr['status'] == 'aprovada' and pr['aceite_em'] is None and o['etapa'] == 'ganho' and o['fechado_em'] and not ks and not pj and len(h) == 1 and sem_dialogo,
+       f"proposta={pr['status']} funil={o['etapa']} contratos={len(ks)} projetos={len(pj)} histórico={len(h)} sem pergunta de contrato={sem_dialogo}")
+    txt = inicio()
+    ok('A2-01b', 'Início mostra "Proposta aprovada: falta o contrato", como no aceite pelo link', 'Proposta aprovada: falta o contrato' in txt and 'Identidade visual' in txt, txt[:300])
+    foto('09_crm_aprovada_manual')
+
+@etapa('A2-05', 'Repetir a aprovação')
+def _():
+    antes = um(f"crm_oportunidades?id=eq.{A2['op1']}&select=fechado_em")['fechado_em']
+    s, j = decidir(A2['p1'], 'aprovada')
+    depois = um(f"crm_oportunidades?id=eq.{A2['op1']}&select=fechado_em")['fechado_em']
+    ok('A2-05', 'Aprovar de novo: nada muda (sem novo histórico, funil intacto)',
+       s == 200 and j.get('ja') is True and antes == depois and len(hist(cliA['id'], 'Identidade visual” (v1) aprovada')) == 1, f'{s} {j}')
+
+@etapa('A2-02', 'Recusa sem motivo')
+def _():
+    op = nova_op(cliA['id'], 'Site institucional'); p = proposta_enviada(cliA['id'], 'Site institucional', extra={'oportunidade_id': op['id']})
+    A2.update(op2=op['id'], p2=p['id'])
+    pg.goto('about:blank'); pg.goto(CRM + f"/app.html#/proposta/{p['id']}"); pg.wait_for_selector('[data-st=recusada]')
+    pg.click('[data-st=recusada]'); pg.wait_for_selector('#dlg[open] [name=motivo]')
+    pg.click('#dlgf button[value=ok]'); pg.wait_for_timeout(300)
+    ainda_aberto = pg.is_visible('#dlg[open]')
+    pg.click('#dlgf button[value=cancelar]'); pg.wait_for_timeout(300)
+    s, j = decidir(p['id'], 'recusada', '  ')
+    pr = um(f"crm_propostas?id=eq.{p['id']}&select=status"); o = um(f"crm_oportunidades?id=eq.{op['id']}&select=etapa,motivo_perda")
+    ok('A2-02', 'Recusar exige o motivo: a tela não deixa sair sem ele e o banco recusa motivo vazio; nada muda',
+       ainda_aberto and s >= 400 and 'motivo' in json.dumps(j, ensure_ascii=False) and pr['status'] == 'enviada' and o['etapa'] == 'negociacao' and not o['motivo_perda'], f'tela aberta={ainda_aberto} banco={s} {j}')
+
+@etapa('A2-03', 'Recusar com motivo pela tela')
+def _():
+    pg.goto('about:blank'); pg.goto(CRM + f"/app.html#/proposta/{A2['p2']}"); pg.wait_for_selector('[data-st=recusada]')
+    pg.click('[data-st=recusada]'); pg.wait_for_selector('#dlg[open] [name=motivo]')
+    pg.fill('#dlgf [name=motivo]', 'Cliente decidiu adiar para março'); pg.click('#dlgf button[value=ok]')
+    pg.wait_for_function("!document.querySelector('[data-st=recusada]')")
+    pr = um(f"crm_propostas?id=eq.{A2['p2']}&select=status"); o = um(f"crm_oportunidades?id=eq.{A2['op2']}&select=etapa,motivo_perda,fechado_em")
+    h = hist(cliA['id'], 'Site institucional” (v1) recusada')
+    ok('A2-03', 'Recusar com motivo: proposta recusada, funil em Perdido com o motivo, histórico, na mesma operação',
+       pr['status'] == 'recusada' and o['etapa'] == 'perdido' and o['motivo_perda'] == 'Cliente decidiu adiar para março' and o['fechado_em'] and len(h) == 1, f'{pr} {o} histórico={len(h)}')
+
+@etapa('A2-04', 'Falha no meio da operação')
+def _():
+    op = nova_op(cliA['id'], 'Falha proposital'); p = proposta_enviada(cliA['id'], 'Falha proposital', extra={'oportunidade_id': op['id']})
+    psql("alter table public.crm_interacoes add constraint teste_falha check (resumo not like 'Proposta “Falha proposital%') not valid")
+    try: s, j = decidir(p['id'], 'aprovada')
+    finally: psql("alter table public.crm_interacoes drop constraint teste_falha")
+    pr = um(f"crm_propostas?id=eq.{p['id']}&select=status"); o = um(f"crm_oportunidades?id=eq.{op['id']}&select=etapa,fechado_em")
+    ok('A2-04', 'Se a última gravação (histórico) falha, nada fica: proposta continua enviada e o funil não muda',
+       s >= 400 and pr['status'] == 'enviada' and o['etapa'] == 'negociacao' and not o['fechado_em'], f'{s} proposta={pr["status"]} funil={o["etapa"]}')
+
+@etapa('A2-06', 'Conflito com oportunidade já encerrada')
+def _():
+    op = nova_op(cliA['id'], 'Fotos', etapa='perdido'); p = proposta_enviada(cliA['id'], 'Fotos', extra={'oportunidade_id': op['id']})
+    s, j = decidir(p['id'], 'aprovada')
+    pr = um(f"crm_propostas?id=eq.{p['id']}&select=status"); o = um(f"crm_oportunidades?id=eq.{op['id']}&select=etapa")
+    ok('A2-06', 'Aprovar com o cartão em Perdido: recusado com mensagem clara; proposta e funil intactos',
+       s >= 400 and 'já está encerrada como Perdido' in json.dumps(j, ensure_ascii=False) and pr['status'] == 'enviada' and o['etapa'] == 'perdido', f'{s} {j}')
+    op2 = nova_op(cliA['id'], 'Vídeo', etapa='ganho'); p2 = proposta_enviada(cliA['id'], 'Vídeo', extra={'oportunidade_id': op2['id']})
+    s2, j2 = decidir(p2['id'], 'recusada', 'Mudou de ideia')
+    ok('A2-06b', 'Recusar com o cartão em Fechado: recusado; nada sobrescrito',
+       s2 >= 400 and 'já está encerrada como Fechado' in json.dumps(j2, ensure_ascii=False) and um(f"crm_oportunidades?id=eq.{op2['id']}&select=etapa")['etapa'] == 'ganho'
+       and um(f"crm_propostas?id=eq.{p2['id']}&select=status")['status'] == 'enviada', f'{s2} {j2}')
+
+@etapa('A2-07', 'Aceite online com o cartão em Perdido')
+def _():
+    op = nova_op(cliA['id'], 'Podcast', etapa='perdido'); p = proposta_enviada(cliA['id'], 'Podcast', extra={'oportunidade_id': op['id']})
+    s, j = fn('crm-proposta', {'acao': 'aceitar', 'token': p['token'], 'nome': 'Ana Teste'}, chave=None)
+    pr = um(f"crm_propostas?id=eq.{p['id']}&select=status,aceite_nome"); o = um(f"crm_oportunidades?id=eq.{op['id']}&select=etapa")
+    h = hist(cliA['id'], 'Podcast” (v1) aceita online')
+    ok('A2-07', 'Aceite do cliente vale, o cartão em Perdido não é sobrescrito, histórico e aviso dizem para revisar o funil',
+       s == 200 and pr['status'] == 'aprovada' and o['etapa'] == 'perdido' and len(h) == 1 and 'não foi alterada' in h[0]['resumo'] and len(avisos('revise o Funil')) == 1,
+       f"{s} proposta={pr['status']} funil={o['etapa']} avisos={avisos('revise o Funil')}")
+
+@etapa('REV-01', 'Desfazer aprovação manual')
+def _():
+    k = criar('crm_contratos', {'cliente_id': cliA['id'], 'proposta_id': A2['p1'], 'titulo': 'Identidade visual', 'tipo': 'avulso', 'valor_avulso': 2000, 'status': 'assinatura'}, TA)
+    antes = um(f"crm_oportunidades?id=eq.{A2['op1']}&select=etapa,fechado_em")
+    s, j = decidir(A2['p1'], 'enviada')
+    pr = um(f"crm_propostas?id=eq.{A2['p1']}&select=status"); o = um(f"crm_oportunidades?id=eq.{A2['op1']}&select=etapa,fechado_em")
+    ks = adm_sr('GET', f"crm_contratos?id=eq.{k['id']}&select=id,status")[1]
+    ok('REV-01', 'Desfazer a aprovação manual: só a proposta volta a enviada; funil continua Fechado, contrato e histórico ficam, reabertura registrada',
+       s == 200 and pr['status'] == 'enviada' and o == antes and len(ks) == 1 and len(hist(cliA['id'], 'Identidade visual” (v1) aprovada')) == 1
+       and len(hist(cliA['id'], 'Identidade visual” (v1) reaberta')) == 1 and j.get('funil_alterado') is False, f'{s} {j} funil={o["etapa"]} contrato={len(ks)}')
+
+@etapa('REV-02', 'Reabrir proposta recusada')
+def _():
+    s, j = decidir(A2['p2'], 'enviada')
+    pr = um(f"crm_propostas?id=eq.{A2['p2']}&select=status"); o = um(f"crm_oportunidades?id=eq.{A2['op2']}&select=etapa,motivo_perda")
+    ok('REV-02', 'Reabrir a recusada: só a proposta volta a enviada; funil continua Perdido com o motivo; recusa e reabertura no histórico',
+       s == 200 and pr['status'] == 'enviada' and o['etapa'] == 'perdido' and o['motivo_perda'] == 'Cliente decidiu adiar para março'
+       and len(hist(cliA['id'], 'Site institucional” (v1) recusada')) == 1 and len(hist(cliA['id'], 'Site institucional” (v1) reaberta')) == 1, f'{s} {j} {o}')
+
+@etapa('DUP-03', 'Mês duplicado: mensagem clara')
+def _():
+    k = criar('crm_contratos', {'cliente_id': cliB['id'], 'titulo': 'Redes mensal B', 'tipo': 'recorrente', 'valor_mensal': 900, 'posts_mes': 4, 'status': 'vigente', 'inicio': dia(0)}, TA)
+    pg.goto('about:blank'); pg.goto(CRM + f"/app.html#/contrato/{k['id']}"); pg.wait_for_selector(f'[data-criar-mes="{MES}"]')
+    s, existente = rest('POST', 'rpc/crm_projeto_de_modelo', {'p_cliente': cliB['id'], 'p_nome': 'Outra aba', 'p_modelo': None, 'p_estrutura': [], 'p_contrato': k['id'], 'p_mes': MES}, TA)
+    pg.click(f'[data-criar-mes="{MES}"]'); pg.wait_for_function(f"location.hash === '#/projeto/{existente}'")
+    t = pg.inner_text('#toast')
+    n = len(adm_sr('GET', f"crm_projetos?contrato_id=eq.{k['id']}&mes=eq.{MES}&select=id")[1])
+    ok('DUP-03', 'Mês já criado (por outra aba): mensagem clara, sem termo técnico, e abre o projeto que já existe; um projeto só',
+       'O projeto deste mês já existe para este contrato' in t and 'duplicate' not in t.lower() and n == 1, f'aviso="{t}" projetos={n}')
 
 # ---------- fim ----------
 ok('SEG-06', 'Nenhum pedido do navegador foi para produção', not bloqueados, bloqueados[:5])

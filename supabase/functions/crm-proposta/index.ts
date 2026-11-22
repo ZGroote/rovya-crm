@@ -34,7 +34,8 @@ Deno.serve(async req => {
       const { data: r, error } = await db.rpc('crm_proposta_aceitar', { p_token: token, p_nome: String(b.nome ?? '').slice(0, 200), p_ip: ip });
       if (error) throw error;
       if (r?.erro) return json({ erro: r.erro }, r.codigo ?? 400);
-      if (!r.ja) await avisar('Proposta aceita ✦', `${r.empresa}: “${r.titulo}”, por ${r.aceite_nome}`, `app.html#/proposta/${r.id}`);
+      if (!r.ja) await avisar(r.conflito ? 'Proposta aceita · revise o Funil' : 'Proposta aceita ✦',
+        `${r.empresa}: “${r.titulo}”, por ${r.aceite_nome}${r.conflito ? '. O cartão estava em Perdido e não foi alterado.' : ''}`, `app.html#/proposta/${r.id}`);
       return json({ ok: true, aceite_em: r.aceite_em, aceite_nome: r.aceite_nome });
     }
     return json({ erro: 'Ação desconhecida.' }, 400);
