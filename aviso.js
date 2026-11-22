@@ -61,7 +61,7 @@ export async function prepararAviso(ids, anterior = {}) {
          <div class="acoes">${a.c.telefone ? `<a class="bt peq" data-zap target="_blank" rel="noopener" href="#">Abrir WhatsApp</a>`
            : a.c.email ? `<button type="button" class="bt peq" data-email>Enviar por e-mail para ${esc(a.c.email)}</button>`
            : '<span class="mute">Sem telefone nem e-mail na ficha. Cadastre um dos dois para avisar.</span>'}</div>
-         <div class="acoes" data-mandou hidden><span>Mandou?</span><button type="button" class="bt peq" data-sim>Sim, mandei</button><button type="button" class="bt peq fantasma" data-nao>Ainda não</button></div>`;
+         ${a.c.telefone ? `<div class="acoes" data-mandou style="display:none;align-items:center"><span>Mandou?</span><button type="button" class="bt peq" data-sim>Sim, mandei</button><button type="button" class="bt peq fantasma" data-nao>Ainda não</button></div>` : ''}`; // "Mandou?" só no WhatsApp, depois de abrir
     return `<section class="card aviso" data-i="${i}" data-cliente="${esc(a.c.id)}" data-op="${a.op}" style="display:grid;gap:8px;margin:0">
       <b>${nome} <small class="mute">· ${n === 1 ? '1 peça' : n + ' peças'} para aprovar</small></b>${corpo}<small class="mute" data-estado></small></section>`;
   };
@@ -79,9 +79,10 @@ export async function prepararAviso(ids, anterior = {}) {
     };
     el.querySelector('[data-acesso]')?.addEventListener('click', () => $('#dlg').close());
     const zap = el.querySelector('[data-zap]');
-    if (zap) zap.onclick = () => { zap.href = `https://wa.me/${numeroZap(a.c.telefone)}?text=${encodeURIComponent(texto())}`; el.querySelector('[data-mandou]').hidden = false; };
+    const mandou = el.querySelector('[data-mandou]'), mostrar = sim => { if (mandou) mandou.style.display = sim ? 'flex' : 'none'; }; // .acoes é flex: o atributo hidden não esconde
+    if (zap) zap.onclick = () => { zap.href = `https://wa.me/${numeroZap(a.c.telefone)}?text=${encodeURIComponent(texto())}`; mostrar(true); };
     if (el.querySelector('[data-sim]')) el.querySelector('[data-sim]').onclick = () => registrar('whatsapp');
-    if (el.querySelector('[data-nao]')) el.querySelector('[data-nao]').onclick = () => { estado('Não registrado. O lembrete continua no Início.'); el.querySelector('[data-mandou]').hidden = true; };
+    if (el.querySelector('[data-nao]')) el.querySelector('[data-nao]').onclick = () => { estado('Não registrado. O lembrete continua no Início.'); mostrar(false); };
     const email = el.querySelector('[data-email]');
     if (email) email.onclick = async () => {
       email.disabled = true; estado('Enviando…');

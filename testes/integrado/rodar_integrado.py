@@ -532,8 +532,10 @@ def _():
     ok('A1-01', 'Ficha do projeto: peça salva como Enviado e o aviso é oferecido com a mensagem aprovada',
        x['status'] == 'enviado' and x['enviado_em'] and 'Oi, Ana! 😊' in t and 'Temos 1 conteúdo novo esperando sua aprovação.' in t and '• Post A1 ficha do projeto' in t
        and 'https://rovyacreative.com.br/portal' in t and 'seguirmos com a programação' in t, t.replace('\n', ' / ')[:200])
-    foto('10_aviso_whatsapp')
+    ok('A1-01b', '"Mandou?" só aparece depois de abrir o WhatsApp', not secao(cliA['id']).locator('[data-sim]').is_visible())
     href = abrir_zap(cliA['id'])
+    ok('A1-01c', 'Depois de abrir o WhatsApp, pergunta "Mandou?"', secao(cliA['id']).locator('[data-sim]').is_visible())
+    foto('10_aviso_whatsapp')
     x = peca(A1['a1'])
     ok('A1-13', 'WhatsApp não abre (bloqueado): a peça continua Enviado e nada é registrado', 'wa.me/5516900000001' in href and x['status'] == 'enviado'
        and len(avisos_hist(cliA['id'])) == A1['hist0'] and not x['aviso_em'], href[:80])
@@ -580,7 +582,8 @@ def _():
     ok('A1-05', 'Lote com dois clientes: duas mensagens, sem misturar títulos', pg.locator('#dlgf .aviso').count() == 2 and 'Lote misto A' in tA and 'Lote misto B' not in tA
        and 'Lote misto B' in tB and 'Lote misto A' not in tB and tB.startswith('Oi, Bruno!'), '')
     sb_ = secao(cliB['id'])
-    ok('A1-15', 'Cliente sem telefone: oferece e-mail no lugar do WhatsApp', sb_.locator('[data-email]').count() == 1 and sb_.locator('[data-zap]').count() == 0, sb_.locator('[data-email]').inner_text())
+    ok('A1-15', 'Cliente sem telefone: oferece e-mail no lugar do WhatsApp, sem "Mandou?"', sb_.locator('[data-email]').count() == 1 and sb_.locator('[data-zap]').count() == 0
+       and sb_.locator('[data-sim]').count() == 0, sb_.locator('[data-email]').inner_text())
     foto('11_aviso_dois_clientes')
     sb_.locator('[data-email]').click(); pg.wait_for_function(f"""document.querySelector('#dlgf .aviso[data-cliente="{cliB['id']}"] [data-estado]').textContent.includes('Registrado')""")
     em = adm_sr('GET', 'teste_emails?select=para,texto')[1]; hb = avisos_hist(cliB['id'])
