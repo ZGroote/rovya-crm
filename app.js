@@ -619,7 +619,8 @@ async function novoEvento(val = {}, ev = null) {
    rovyacreative.com.br/agendar divide em conversas de crm_slot minutos e só mostra o que não bate com nada da agenda.
    Pessoal e BNI só ocupam o horário (o site não oferece): Pessoal vai para a agenda pessoal (ou fica privado na profissional), BNI na profissional.
    Rovya vale só para a semana marcada (a Sabrina abre o público semana a semana); Pessoal e BNI podem repetir toda semana.
-   Modo "Apagar": cada toque tira aquela hora do bloco (encurta ou divide); bloco que repete toda semana perde a hora em todas. */
+   Botão "Apagar" (ao lado de Salvar): o cursor vira lixeira e cada toque num horário da categoria escolhida tira aquela hora
+   do bloco (encurta ou divide); bloco que repete toda semana perde a hora em todas. */
 const DURACAO_CONVERSA = 60;
 const BLOCOS = { rovya: ['Rovya', 'aberto para agendarem pelo site'], pessoal: ['Pessoal', 'só bloqueia; ninguém vê o que é'], bni: ['BNI', 'reunião do BNI'] };
 const HORAS = Array.from({ length: 16 }, (_, i) => i + 6); // blocos de 1 h, das 6h às 22h
@@ -636,7 +637,7 @@ const eventoBloco = (tipo, dia, h0, h1, repetir) => {
   if (repetir && tipo !== 'rovya') e.recurrence = ['RRULE:FREQ=WEEKLY'];
   return e;
 };
-async function horarios(sem, manter = {}) {
+async function horarios(sem, manter = {}, estado = {}) {
   const n = Math.max(0, Math.min(52, parseInt(sem) || 0));
   const seg = new Date(); seg.setHours(0, 0, 0, 0); seg.setDate(seg.getDate() - (seg.getDay() + 6) % 7 + 7 * n);
   const dias = Array.from({ length: 7 }, (_, i) => { const d = new Date(seg); d.setDate(d.getDate() + i); return d.toLocaleDateString('sv'); });
@@ -659,20 +660,20 @@ async function horarios(sem, manter = {}) {
       if (ini < a + 36e5 && fim > a && (!cel[k] || cel[k].tipo === 'rovya')) cel[k] = { tipo, e };
     }
   }
-  const novos = { ...manter }; let modo = 'rovya', pintar = null, apagando = false;
+  const novos = { ...manter }; let modo = estado.modo || 'rovya', apagar = !!estado.apagar, pintar = null, apagando = false;
   $('#hSub').textContent = `${curto(dias[0])} a ${curto(dias[6])}`;
   $('#hCorpo').innerHTML = `<section class="card horarios">
-    <div class="h-barra"><div class="modos" role="radiogroup" aria-label="O que marcar">${Object.entries(BLOCOS).map(([k, [nome, dica]]) => `<button type="button" class="chip m-${k} ${k === modo ? 'ativo' : ''}" data-modo="${k}" role="radio" aria-checked="${k === modo}" title="${dica}"><i></i>${nome}</button>`).join('')}<button type="button" class="chip m-apagar" data-modo="apagar" role="radio" aria-checked="false" title="cada toque tira aquela hora"><i></i>Apagar</button></div>
+    <div class="h-barra"><div class="modos" role="radiogroup" aria-label="O que marcar">${Object.entries(BLOCOS).map(([k, [nome, dica]]) => `<button type="button" class="chip m-${k} ${k === modo ? 'ativo' : ''}" data-modo="${k}" role="radio" aria-checked="${k === modo}" title="${dica}"><i></i>${nome}</button>`).join('')}</div>
       <label class="h-rep"><input type="checkbox" id="hRep"> Repetir Pessoal e BNI toda semana</label>
       <div class="h-nav">${n ? `<a class="bt peq sec" href="#/horarios/${n - 1}" aria-label="Semana anterior">‹</a>` : ''}<a class="bt peq sec" href="#/horarios/${n + 1}" aria-label="Próxima semana">›</a></div></div>
-    <p class="mute h-dica">Escolha o tipo e toque nos horários (no computador dá para arrastar). <b>Rovya</b> fica aberto para qualquer pessoa agendar uma conversa de 1 hora em <a href="${LINK_AGENDA}" target="_blank" rel="noopener">rovyacreative.com.br/agendar</a>; <b>Pessoal</b> e <b>BNI</b> só bloqueiam. Rovya vale só para esta semana. Com <b>Apagar</b>, cada toque tira aquela hora (se o bloco repete toda semana, tira de todas).</p>
-    <div class="semana" id="hGrade"><div></div>${dias.map(d => `<div class="sd ${d === hoje() ? 'hj' : ''}">${new Date(d + 'T12:00').toLocaleDateString('pt-BR', { weekday: 'short' }).replace('.', '')}<b>${+d.slice(8)}</b></div>`).join('')}
+    <p class="mute h-dica">Escolha o tipo e toque nos horários (no computador dá para arrastar). <b>Rovya</b> fica aberto para qualquer pessoa agendar uma conversa de 1 hora em <a href="${LINK_AGENDA}" target="_blank" rel="noopener">rovyacreative.com.br/agendar</a>; <b>Pessoal</b> e <b>BNI</b> só bloqueiam. Rovya vale só para esta semana. Para tirar: ligue <b>Apagar</b>, escolha a categoria e toque nos horários (se o bloco repete toda semana, tira de todas).</p>
+    <div class="semana${apagar ? ' lixeira' : ''}" id="hGrade"><div></div>${dias.map(d => `<div class="sd ${d === hoje() ? 'hj' : ''}">${new Date(d + 'T12:00').toLocaleDateString('pt-BR', { weekday: 'short' }).replace('.', '')}<b>${+d.slice(8)}</b></div>`).join('')}
       ${HORAS.map(h => `<div class="sh">${h}h</div>` + dias.map(d => {
         const k = d + '|' + h, c = cel[k], passou = inicioHora(d, h) + 36e5 <= agora;
         const v = !c && novos[k], rot = c ? (c.tipo === 'ocupado' ? c.e.summary || 'Ocupado' : BLOCOS[c.tipo][0]) : v ? BLOCOS[v][0] : '';
         return `<button type="button" class="sc ${c ? 'k-' + c.tipo : v ? `k-${v} novo` : ''}" data-k="${k}" ${passou ? 'disabled' : ''} title="${esc(`${curto(d)}, ${h}h–${h + 1}h${rot ? ' · ' + rot : ''}`)}">${esc(rot)}</button>`;
       }).join('')).join('')}</div>
-    <div class="acoes h-salvar"><button class="bt" id="hSalvar" disabled>Salvar</button><span class="mute" id="hConta"></span></div></section>`;
+    <div class="acoes h-salvar"><button class="bt" id="hSalvar" disabled>Salvar</button><button type="button" class="bt sec h-lixo${apagar ? ' ativo' : ''}" id="hApagar" aria-pressed="${apagar}" title="Liga/desliga: cada toque num horário da categoria escolhida apaga aquela hora"><svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M2.5 4h11M6 4V2.5h4V4M4 4l.7 9.5h6.6L12 4M6.8 6.5v5M9.2 6.5v5"/></svg>Apagar</button><span class="mute" id="hConta"></span></div></section>`;
   const grade = $('#hGrade');
   const marcar = (b, v) => {
     const k = b.dataset.k; if (v) novos[k] = v; else delete novos[k];
@@ -683,20 +684,26 @@ async function horarios(sem, manter = {}) {
     const b = ev.target.closest('[data-modo]'); if (!b) return; modo = b.dataset.modo;
     $('#hCorpo').querySelectorAll('[data-modo]').forEach(x => { x.classList.toggle('ativo', x === b); x.setAttribute('aria-checked', x === b); });
   };
+  $('#hApagar').onclick = () => {
+    apagar = !apagar; grade.classList.toggle('lixeira', apagar);
+    $('#hApagar').classList.toggle('ativo', apagar); $('#hApagar').setAttribute('aria-pressed', apagar);
+    if (apagar) toast(`Apagar ligado: toque nos horários ${BLOCOS[modo][0]} que quer tirar.`);
+  };
   const tirarHora = async b => {
     if (apagando) return toast('Aguarde: ainda tirando o horário anterior.');
     apagando = true; b.classList.add('apagando');
     const [d, h] = b.dataset.k.split('|'), c = cel[b.dataset.k];
     try { await tirarDoBloco(c.e, inicioHora(d, +h)); toast(c.e.recurringEventId ? 'Tirado de todas as semanas' : 'Tirado'); }
     catch (e) { toast(semRede(e) ? 'Sem internet: precisa de conexão.' : e.message, true); }
-    horarios(n, novos);
+    horarios(n, novos, { modo, apagar });
   };
   const tocar = (b, mouse) => {
     const c = cel[b.dataset.k];
-    if (modo === 'apagar') {
-      if (novos[b.dataset.k]) return marcar(b, null);
+    if (apagar) {   // só a categoria escolhida: tocar num Pessoal com Rovya escolhido não apaga nada
+      if (novos[b.dataset.k]) return novos[b.dataset.k] === modo && marcar(b, null);
       if (!c) return;
-      return c.tipo === 'ocupado' ? toast(`${c.e.summary || 'Compromisso'}: mude pela Agenda.`) : tirarHora(b);
+      if (c.tipo === 'ocupado') return toast(`${c.e.summary || 'Compromisso'}: mude pela Agenda.`);
+      return c.tipo === modo ? tirarHora(b) : toast(`Esse horário é ${BLOCOS[c.tipo][0]}: escolha ${BLOCOS[c.tipo][0]} lá em cima para apagar.`);
     }
     if (c) { if (c.tipo === 'ocupado') toast(`${c.e.summary || 'Compromisso'}: mude pela Agenda.`); else verBloco(c.e).then(ok => ok && horarios(n)); return; }
     pintar = novos[b.dataset.k] === modo ? null : modo; marcar(b, pintar);

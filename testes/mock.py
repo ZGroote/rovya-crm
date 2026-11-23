@@ -96,6 +96,8 @@ window.fetch = (u, o) => {
   const b = JSON.parse(o.body); window.__ev.push(b);
   if (b.acao === 'listar') { const de = new Date(b.de), ate = new Date(b.ate);
     return Promise.resolve(new Response(JSON.stringify({ ...EV, eventos: EV.eventos.filter(e => new Date(e.start.dateTime) < ate && new Date(e.end.dateTime) > de) }))); }
+  if (b.acao === 'editar') { const e = EV.eventos.find(x => x.id === b.id); if (e) Object.assign(e, b.evento); return Promise.resolve(new Response(JSON.stringify(e || {}))); }
+  if (b.acao === 'apagar') { EV.eventos = EV.eventos.filter(x => x.id !== b.id); return Promise.resolve(new Response('{}')); }
   if (b.acao === 'url') return Promise.resolve(new Response(JSON.stringify({ url: '#/agenda' })));
   if (b.acao === 'criar') { const e = { id: 'n' + window.__ev.length, ...b.evento, _agenda: b.agenda, _tipo: b.agenda === 'pessoal' ? 'pessoal' : 'profissional' }; if (e.conferenceData) e.hangoutLink = 'https://meet.google.com/abc-defg-hij'; EV.eventos.push(e); return Promise.resolve(new Response(JSON.stringify(e))); }
   if (b.acao === 'agendas') return Promise.resolve(new Response(JSON.stringify({ faltam: [], config: { profissional: 'primary', pessoal: EV.temPessoal ? 'pes1' : null, mostrar: [] },
