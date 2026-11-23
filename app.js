@@ -618,13 +618,14 @@ async function novoEvento(val = {}, ev = null) {
    Rovya = período aberto para novos clientes: evento livre (transparent) com crm_reserva=1 na agenda profissional; a página
    rovyacreative.com.br/agendar divide em conversas de crm_slot minutos e só mostra o que não bate com nada da agenda.
    Pessoal e BNI só ocupam o horário (o site não oferece): Pessoal vai para a agenda pessoal (ou fica privado na profissional), BNI na profissional.
-   Com "repetir toda semana", cada bloco repete sem fim, até ela tirar (o site só olha os próximos 45 dias). */
+   Cada bloco vale só para a semana em que foi marcado: a Sabrina monta a rotina semana a semana. Blocos que já repetiam
+   (versão antiga) saem com "Tirar todas as semanas". */
 const DURACAO_CONVERSA = 60;
 const BLOCOS = { rovya: ['Rovya', 'aberto para agendarem pelo site'], pessoal: ['Pessoal', 'só bloqueia; ninguém vê o que é'], bni: ['BNI', 'reunião do BNI'] };
 const HORAS = Array.from({ length: 16 }, (_, i) => i + 6); // blocos de 1 h, das 6h às 22h
 const tipoBloco = e => reserva(e) ? 'rovya' : BLOCOS[e.extendedProperties?.private?.crm_bloco] ? e.extendedProperties.private.crm_bloco : null;
 const doisDig = h => String(h).padStart(2, '0');
-const eventoBloco = (tipo, dia, h0, h1, repetir) => {
+const eventoBloco = (tipo, dia, h0, h1) => {
   const tz = 'America/Sao_Paulo';
   const e = tipo === 'rovya'
     ? { summary: 'Reservado · novos clientes', transparency: 'transparent', description: 'Horário aberto para novos clientes agendarem pelo site (rovyacreative.com.br/agendar). Criado pelo CRM.',
@@ -632,7 +633,6 @@ const eventoBloco = (tipo, dia, h0, h1, repetir) => {
     : { summary: BLOCOS[tipo][0], description: 'Bloqueado pelo CRM (Horários da semana).', extendedProperties: { private: { crm_bloco: tipo } },
       ...(tipo === 'pessoal' && !TEM_PESSOAL ? { visibility: 'private' } : {}) };
   e.start = { dateTime: `${dia}T${doisDig(h0)}:00:00`, timeZone: tz }; e.end = { dateTime: `${dia}T${doisDig(h1)}:00:00`, timeZone: tz };
-  if (repetir) e.recurrence = ['RRULE:FREQ=WEEKLY'];
   return e;
 };
 async function horarios(sem) {
@@ -662,7 +662,6 @@ async function horarios(sem) {
   $('#hSub').textContent = `${curto(dias[0])} a ${curto(dias[6])}`;
   $('#hCorpo').innerHTML = `<section class="card horarios">
     <div class="h-barra"><div class="modos" role="radiogroup" aria-label="O que marcar">${Object.entries(BLOCOS).map(([k, [nome, dica]]) => `<button type="button" class="chip m-${k} ${k === modo ? 'ativo' : ''}" data-modo="${k}" role="radio" aria-checked="${k === modo}" title="${dica}"><i></i>${nome}</button>`).join('')}</div>
-      <label class="h-rep"><input type="checkbox" id="hRep" checked> Repetir toda semana</label>
       <div class="h-nav">${n ? `<a class="bt peq sec" href="#/horarios/${n - 1}" aria-label="Semana anterior">‹</a>` : ''}<a class="bt peq sec" href="#/horarios/${n + 1}" aria-label="Próxima semana">›</a></div></div>
     <p class="mute h-dica">Escolha o tipo e toque nos horários (no computador dá para arrastar). <b>Rovya</b> fica aberto para qualquer pessoa agendar uma conversa de 1 hora em <a href="${LINK_AGENDA}" target="_blank" rel="noopener">rovyacreative.com.br/agendar</a>; <b>Pessoal</b> e <b>BNI</b> só bloqueiam. Toque num horário já marcado para tirar.</p>
     <div class="semana" id="hGrade"><div></div>${dias.map(d => `<div class="sd ${d === hoje() ? 'hj' : ''}">${new Date(d + 'T12:00').toLocaleDateString('pt-BR', { weekday: 'short' }).replace('.', '')}<b>${+d.slice(8)}</b></div>`).join('')}
@@ -700,13 +699,13 @@ async function horarios(sem) {
       const t = novos[d + '|' + h]; if (!t) continue;
       const u = blocos.at(-1); if (u && u.d === d && u.t === t && u.h1 === h) u.h1++; else blocos.push({ d, t, h0: h, h1: h + 1 });
     }
-    const repetir = $('#hRep').checked; $('#hSalvar').disabled = true; $('#hSalvar').textContent = 'Salvando…';
+    $('#hSalvar').disabled = true; $('#hSalvar').textContent = 'Salvando…';
     let feitos = 0;
     for (const b of blocos) {
-      try { await google('criar', { evento: eventoBloco(b.t, b.d, b.h0, b.h1, repetir), agenda: b.t === 'pessoal' && TEM_PESSOAL ? 'pessoal' : 'profissional' }); feitos++; }
+      try { await google('criar', { evento: eventoBloco(b.t, b.d, b.h0, b.h1), agenda: b.t === 'pessoal' && TEM_PESSOAL ? 'pessoal' : 'profissional' }); feitos++; }
       catch (e) { toast((feitos ? `${feitos} salvo(s); parou: ` : '') + (semRede(e) ? 'sem internet.' : e.message), true); return horarios(n); }
     }
-    toast(`Salvo${repetir ? ', toda semana' : ''}.${blocos.some(b => b.t === 'rovya') ? ' Os horários Rovya já aparecem na agenda do site.' : ''}`);
+    toast(`Salvo nesta semana.${blocos.some(b => b.t === 'rovya') ? ' Os horários Rovya já aparecem na agenda do site.' : ''}`);
     horarios(n);
   };
 }
@@ -943,8 +942,8 @@ const ACOES_IA = {
     const h0 = Math.round(a.hora_inicio), h1 = Math.round(a.hora_fim);
     if (!/^\d{4}-\d{2}-\d{2}$/.test(a.data || '') || !(h0 >= 6 && h1 <= 22 && h1 > h0)) { toast('Período inválido: horas cheias, das 6h às 22h.', true); return false; }
     const quando = new Date(a.data + 'T12:00').toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' });
-    if (!await confirma(`Abrir ${quando}, das ${h0}h às ${h1}h${a.repetir ? ' (toda semana)' : ''}, para novos clientes marcarem pelo site?`)) return false;
-    try { await google('criar', { evento: eventoBloco('rovya', a.data, h0, h1, !!a.repetir), agenda: 'profissional' }); }
+    if (!await confirma(`Abrir ${quando}, das ${h0}h às ${h1}h, para novos clientes marcarem pelo site?`)) return false;
+    try { await google('criar', { evento: eventoBloco('rovya', a.data, h0, h1), agenda: 'profissional' }); }
     catch (e) { toast(semRede(e) ? 'Sem internet: abrir horário precisa de conexão.' : e.message, true); return false; }
     toast('Horário aberto no site'); return true;
   } },
