@@ -619,11 +619,12 @@ async function novoEvento(val = {}, ev = null) {
    rovyacreative.com.br/agendar divide em conversas de crm_slot minutos e só mostra o que não bate com nada da agenda.
    Pessoal e BNI só ocupam o horário (o site não oferece): Pessoal vai para a agenda pessoal (ou fica privado na profissional), BNI na profissional.
    Rovya vale só para a semana marcada (a Sabrina abre o público semana a semana); Pessoal e BNI podem repetir toda semana.
-   Botão "Apagar" (ao lado de Salvar): o cursor vira lixeira e cada toque num horário da categoria escolhida tira aquela hora
+   Rotina da Sabrina: põe os compromissos no Google, marca Pessoal/BNI aqui e toca em "Liberar vagos", que pinta de Rovya
+   toda hora livre da semana (6h–23h); ela confere e salva. Botão "Apagar" (ao lado de Salvar): o cursor vira lixeira e cada toque num horário da categoria escolhida tira aquela hora
    do bloco (encurta ou divide); bloco que repete toda semana perde a hora em todas. */
 const DURACAO_CONVERSA = 60;
 const BLOCOS = { rovya: ['Rovya', 'aberto para agendarem pelo site'], pessoal: ['Pessoal', 'só bloqueia; ninguém vê o que é'], bni: ['BNI', 'reunião do BNI'] };
-const HORAS = Array.from({ length: 16 }, (_, i) => i + 6); // blocos de 1 h, das 6h às 22h
+const HORAS = Array.from({ length: 17 }, (_, i) => i + 6); // blocos de 1 h, das 6h às 23h
 const tipoBloco = e => reserva(e) ? 'rovya' : BLOCOS[e.extendedProperties?.private?.crm_bloco] ? e.extendedProperties.private.crm_bloco : null;
 const doisDig = h => String(h).padStart(2, '0');
 const eventoBloco = (tipo, dia, h0, h1, repetir) => {
@@ -666,14 +667,14 @@ async function horarios(sem, manter = {}, estado = {}) {
     <div class="h-barra"><div class="modos" role="radiogroup" aria-label="O que marcar">${Object.entries(BLOCOS).map(([k, [nome, dica]]) => `<button type="button" class="chip m-${k} ${k === modo ? 'ativo' : ''}" data-modo="${k}" role="radio" aria-checked="${k === modo}" title="${dica}"><i></i>${nome}</button>`).join('')}</div>
       <label class="h-rep"><input type="checkbox" id="hRep"> Repetir Pessoal e BNI toda semana</label>
       <div class="h-nav">${n ? `<a class="bt peq sec" href="#/horarios/${n - 1}" aria-label="Semana anterior">‹</a>` : ''}<a class="bt peq sec" href="#/horarios/${n + 1}" aria-label="Próxima semana">›</a></div></div>
-    <p class="mute h-dica">Escolha o tipo e toque nos horários (no computador dá para arrastar). <b>Rovya</b> fica aberto para qualquer pessoa agendar uma conversa de 1 hora em <a href="${LINK_AGENDA}" target="_blank" rel="noopener">rovyacreative.com.br/agendar</a>; <b>Pessoal</b> e <b>BNI</b> só bloqueiam. Rovya vale só para esta semana. Para tirar: ligue <b>Apagar</b>, escolha a categoria e toque nos horários (se o bloco repete toda semana, tira de todas).</p>
+    <p class="mute h-dica">Escolha o tipo e toque nos horários (no computador dá para arrastar). <b>Rovya</b> fica aberto para qualquer pessoa agendar uma conversa de 1 hora em <a href="${LINK_AGENDA}" target="_blank" rel="noopener">rovyacreative.com.br/agendar</a>; <b>Pessoal</b> e <b>BNI</b> só bloqueiam. Rovya vale só para esta semana: <b>Liberar vagos</b> marca como Rovya todas as horas livres (confira e salve). Para tirar: ligue <b>Apagar</b>, escolha a categoria e toque nos horários (se o bloco repete toda semana, tira de todas).</p>
     <div class="semana${apagar ? ' lixeira' : ''}" id="hGrade"><div></div>${dias.map(d => `<div class="sd ${d === hoje() ? 'hj' : ''}">${new Date(d + 'T12:00').toLocaleDateString('pt-BR', { weekday: 'short' }).replace('.', '')}<b>${+d.slice(8)}</b></div>`).join('')}
       ${HORAS.map(h => `<div class="sh">${h}h</div>` + dias.map(d => {
         const k = d + '|' + h, c = cel[k], passou = inicioHora(d, h) + 36e5 <= agora;
         const v = !c && novos[k], rot = c ? (c.tipo === 'ocupado' ? c.e.summary || 'Ocupado' : BLOCOS[c.tipo][0]) : v ? BLOCOS[v][0] : '';
         return `<button type="button" class="sc ${c ? 'k-' + c.tipo : v ? `k-${v} novo` : ''}" data-k="${k}" ${passou ? 'disabled' : ''} title="${esc(`${curto(d)}, ${h}h–${h + 1}h${rot ? ' · ' + rot : ''}`)}">${esc(rot)}</button>`;
       }).join('')).join('')}</div>
-    <div class="acoes h-salvar"><button class="bt" id="hSalvar" disabled>Salvar</button><button type="button" class="bt sec h-lixo${apagar ? ' ativo' : ''}" id="hApagar" aria-pressed="${apagar}" title="Liga/desliga: cada toque num horário da categoria escolhida apaga aquela hora"><svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M2.5 4h11M6 4V2.5h4V4M4 4l.7 9.5h6.6L12 4M6.8 6.5v5M9.2 6.5v5"/></svg>Apagar</button><span class="mute" id="hConta"></span></div></section>`;
+    <div class="acoes h-salvar"><button class="bt" id="hSalvar" disabled>Salvar</button><button type="button" class="bt sec h-lixo${apagar ? ' ativo' : ''}" id="hApagar" aria-pressed="${apagar}" title="Liga/desliga: cada toque num horário da categoria escolhida apaga aquela hora"><svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M2.5 4h11M6 4V2.5h4V4M4 4l.7 9.5h6.6L12 4M6.8 6.5v5M9.2 6.5v5"/></svg>Apagar</button><button type="button" class="bt sec" id="hVagos" title="Pinta de Rovya toda hora livre desta semana; confira e clique em Salvar">Liberar vagos</button><span class="mute" id="hConta"></span></div></section>`;
   const grade = $('#hGrade');
   const marcar = (b, v) => {
     const k = b.dataset.k; if (v) novos[k] = v; else delete novos[k];
@@ -688,6 +689,13 @@ async function horarios(sem, manter = {}, estado = {}) {
     apagar = !apagar; grade.classList.toggle('lixeira', apagar);
     $('#hApagar').classList.toggle('ativo', apagar); $('#hApagar').setAttribute('aria-pressed', apagar);
     if (apagar) toast(`Apagar ligado: toque nos horários ${BLOCOS[modo][0]} que quer tirar.`);
+  };
+  // horas livres da semana (sem compromisso, Pessoal, BNI ou Rovya, e que ainda não passaram) viram Rovya para salvar
+  $('#hVagos').onclick = () => {
+    let q = 0;
+    grade.querySelectorAll('.sc:not(:disabled)').forEach(b => { if (!cel[b.dataset.k] && !novos[b.dataset.k]) { marcar(b, 'rovya'); q++; } });
+    $('#hCorpo').querySelector('[data-modo=rovya]').click();   // tocar num vago marcado desmarca
+    toast(q ? `${q} hora(s) vaga(s) marcadas como Rovya. Confira (tocar desmarca) e clique em Salvar.` : 'Nenhuma hora vaga nesta semana.');
   };
   const tirarHora = async b => {
     if (apagando) return toast('Aguarde: ainda tirando o horário anterior.');
@@ -979,7 +987,7 @@ const ACOES_IA = {
   agendar_compromisso: { icone: '◷', verbo: 'Revisar compromisso', fazer: a => novoEvento(so({ titulo: a.titulo, cliente_id: a.cliente_id, data: a.data, hora: a.hora, duracao: a.duracao, notas: a.notas, meet: a.meet ? '1' : '', convidar: a.convidar ? '1' : '' })) },
   abrir_horario_site: { icone: '◷', verbo: 'Abrir no site', fazer: async a => {
     const h0 = Math.round(a.hora_inicio), h1 = Math.round(a.hora_fim);
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(a.data || '') || !(h0 >= 6 && h1 <= 22 && h1 > h0)) { toast('Período inválido: horas cheias, das 6h às 22h.', true); return false; }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(a.data || '') || !(h0 >= 6 && h1 <= 23 && h1 > h0)) { toast('Período inválido: horas cheias, das 6h às 23h.', true); return false; }
     const quando = new Date(a.data + 'T12:00').toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' });
     if (!await confirma(`Abrir ${quando}, das ${h0}h às ${h1}h, para novos clientes marcarem pelo site?`)) return false;
     try { await google('criar', { evento: eventoBloco('rovya', a.data, h0, h1), agenda: 'profissional' }); }

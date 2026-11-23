@@ -108,6 +108,15 @@ with sync_playwright() as p:
     ok(len(ev('apagar')) == na + 1, 'bloco de 1 hora: apaga o evento')
     pg.screenshot(path=os.path.join(S, 'ag_horarios_apagar.png'), full_page=True)
     pg.click('#hApagar')
+    # Liberar vagos: toda hora livre da semana vira Rovya (confere e salva); o que já tem algo fica como está
+    pg.click('#hVagos'); pg.wait_for_timeout(200)
+    ok('novo' in pg.get_attribute(cel(seg, 6), 'class') and 'k-rovya' in pg.get_attribute(cel(seg, 22), 'class'), 'vagos: 6h e 22h viram Rovya (grade vai até 23h)')
+    ok('k-ocupado' in pg.get_attribute(cel(ter, 10), 'class') and 'k-bni' in pg.get_attribute(cel(seg, 18), 'class') and 'novo' not in pg.get_attribute(cel(seg, 18), 'class'), 'vagos: compromisso e BNI ficam como estão')
+    pg.click(cel(seg, 7)); ok('novo' not in pg.get_attribute(cel(seg, 7), 'class'), 'tocar num vago marcado desmarca')
+    nc = len(ev('criar')); pg.click('#hSalvar'); pg.wait_for_selector(cel(seg, 6) + '.k-rovya:not(.novo)')
+    vs = [c['evento'] for c in ev('criar')[nc:] if c['evento']['start']['dateTime'].startswith(seg)]
+    ok(any(v['start']['dateTime'] == seg + 'T06:00:00' and v['end']['dateTime'] == seg + 'T07:00:00' for v in vs) and any(v['end']['dateTime'] == seg + 'T23:00:00' for v in vs), 'vagos salvos em períodos (6h–7h … até 23h)')
+    ok(all('recurrence' not in v and v['extendedProperties']['private'].get('crm_reserva') == '1' for v in vs), 'vagos: Rovya, só esta semana')
     pg.set_viewport_size({'width': 390, 'height': 844}); pg.wait_for_timeout(200)
     ok(pg.evaluate('document.documentElement.scrollWidth <= innerWidth'), 'no celular, a semana cabe sem rolar para o lado')
     pg.screenshot(path=os.path.join(S, 'ag_horarios_cel.png'), full_page=True)
