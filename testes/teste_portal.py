@@ -49,9 +49,9 @@ with sync_playwright() as p:
 
     pg.goto('http://portal.local/portal'); pg.wait_for_selector('#vEntrar:not([hidden])')
     ok(pg.locator('#sair').is_hidden(), 'antes de entrar: tela de login, sem botão Sair')
-    pg.fill('#fEntrar [name=email]', 'paulo@x.com'); pg.fill('#fEntrar [name=senha]', 'errada'); pg.click('#fEntrar button')
+    pg.fill('#fEntrar [name=email]', 'paulo@x.com'); pg.fill('#fEntrar [name=senha]', 'errada'); pg.click('#fEntrar .lg-entrar')
     pg.wait_for_selector('#mEntrar:not(:empty)'); ok(pg.inner_text('#mEntrar') == 'E-mail ou senha não conferem.', 'senha errada: mensagem em português')
-    pg.fill('#fEntrar [name=senha]', 'certa'); pg.click('#fEntrar button'); pg.wait_for_selector('#vSenha:not([hidden])')
+    pg.fill('#fEntrar [name=senha]', 'certa'); pg.click('#fEntrar .lg-entrar'); pg.wait_for_selector('#vSenha:not([hidden])')
     ok(pg.locator('#cancelaSenha').is_hidden(), 'primeiro acesso: pede a senha nova antes de mostrar o portal (sem "Voltar")')
     pg.fill('#fSenha [name=nova]', 'minhaSenha1'); pg.fill('#fSenha [name=repete]', 'outraSenha1'); pg.click('#fSenha button >> nth=0')
     ok('não são iguais' in pg.inner_text('#mSenha'), 'senhas diferentes: avisa')
@@ -115,7 +115,7 @@ with sync_playwright() as p:
     ok(pg.evaluate('document.documentElement.scrollWidth') <= 390, 'celular: sem rolagem para o lado')
     pg.screenshot(path='testes/saida/portal_celular.png', full_page=True)
     pg.click('#sair'); pg.wait_for_selector('#vEntrar:not([hidden])'); ok(True, 'sair volta para o login')
-    estado['sem_acesso'] = True; pg.evaluate('window.__S.trocar = false'); pg.fill('#fEntrar [name=email]', 'paulo@x.com'); pg.fill('#fEntrar [name=senha]', 'certa'); pg.click('#fEntrar button')
+    estado['sem_acesso'] = True; pg.evaluate('window.__S.trocar = false'); pg.fill('#fEntrar [name=email]', 'paulo@x.com'); pg.fill('#fEntrar [name=senha]', 'certa'); pg.click('#fEntrar .lg-entrar')
     pg.wait_for_selector('#mEntrar:not(:empty)'); ok('não tem acesso' in pg.inner_text('#mEntrar') and pg.evaluate('window.__S.session') is None, 'login sem vínculo: avisa e desloga')
 
     # CRM: cartão na ficha do cliente
