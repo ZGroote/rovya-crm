@@ -939,6 +939,15 @@ const ACOES_IA = {
     return true;
   } },
   agendar_compromisso: { icone: '◷', verbo: 'Revisar compromisso', fazer: a => novoEvento(so({ titulo: a.titulo, cliente_id: a.cliente_id, data: a.data, hora: a.hora, duracao: a.duracao, notas: a.notas, meet: a.meet ? '1' : '', convidar: a.convidar ? '1' : '' })) },
+  abrir_horario_site: { icone: '◷', verbo: 'Abrir no site', fazer: async a => {
+    const h0 = Math.round(a.hora_inicio), h1 = Math.round(a.hora_fim);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(a.data || '') || !(h0 >= 6 && h1 <= 22 && h1 > h0)) { toast('Período inválido: horas cheias, das 6h às 22h.', true); return false; }
+    const quando = new Date(a.data + 'T12:00').toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' });
+    if (!await confirma(`Abrir ${quando}, das ${h0}h às ${h1}h${a.repetir ? ' (toda semana)' : ''}, para novos clientes marcarem pelo site?`)) return false;
+    try { await google('criar', { evento: eventoBloco('rovya', a.data, h0, h1, !!a.repetir), agenda: 'profissional' }); }
+    catch (e) { toast(semRede(e) ? 'Sem internet: abrir horário precisa de conexão.' : e.message, true); return false; }
+    toast('Horário aberto no site'); return true;
+  } },
   escrever_email: { icone: '✉', verbo: 'Revisar e enviar', fazer: async a => { const c = await umRegistro('crm_clientes', a.cliente_id); return c ? enviarEmail(c, so({ assunto: a.assunto, texto: a.texto })) : naoAchei(); } },
   escrever_whatsapp: { icone: '☏', verbo: 'Revisar e abrir no WhatsApp', fazer: async a => {
     const c = await umRegistro('crm_clientes', a.cliente_id); if (!c) return naoAchei();
