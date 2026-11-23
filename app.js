@@ -664,10 +664,10 @@ async function horarios(sem, manter = {}, estado = {}) {
   const novos = { ...manter }; let modo = estado.modo || 'rovya', apagar = !!estado.apagar, pintar = null, apagando = false;
   $('#hSub').textContent = `${curto(dias[0])} a ${curto(dias[6])}`;
   $('#hCorpo').innerHTML = `<section class="card horarios">
-    <div class="h-barra"><div class="modos" role="radiogroup" aria-label="O que marcar">${Object.entries(BLOCOS).map(([k, [nome, dica]]) => `<button type="button" class="chip m-${k} ${k === modo ? 'ativo' : ''}" data-modo="${k}" role="radio" aria-checked="${k === modo}" title="${dica}"><i></i>${nome}</button>`).join('')}</div>
+    <div class="h-barra"><div class="modos" role="radiogroup" aria-label="O que marcar">${Object.entries(BLOCOS).map(([k, [nome, dica]]) => `<button type="button" class="chip m-${k} ${k === modo ? 'ativo' : ''}" data-modo="${k}" role="radio" aria-checked="${k === modo}" title="${dica}"><i></i>${nome}</button>`).join('')}<button type="button" class="chip m-compromisso ${modo === 'compromisso' ? 'ativo' : ''}" data-modo="compromisso" role="radio" aria-checked="${modo === 'compromisso'}" title="reunião de verdade no Google Agenda (com Meet e convite, se quiser)"><i></i>Compromisso</button></div>
       <label class="h-rep"><input type="checkbox" id="hRep"> Repetir Pessoal e BNI toda semana</label>
       <div class="h-nav">${n ? `<a class="bt peq sec" href="#/horarios/${n - 1}" aria-label="Semana anterior">‹</a>` : ''}<a class="bt peq sec" href="#/horarios/${n + 1}" aria-label="Próxima semana">›</a></div></div>
-    <p class="mute h-dica">Escolha o tipo e toque nos horários (no computador dá para arrastar). <b>Rovya</b> fica aberto para qualquer pessoa agendar uma conversa de 1 hora em <a href="${LINK_AGENDA}" target="_blank" rel="noopener">rovyacreative.com.br/agendar</a>; <b>Pessoal</b> e <b>BNI</b> só bloqueiam. Rovya vale só para esta semana: <b>Liberar vagos</b> marca como Rovya todas as horas livres (confira e salve). Para tirar: ligue <b>Apagar</b>, escolha a categoria e toque nos horários (se o bloco repete toda semana, tira de todas).</p>
+    <p class="mute h-dica">Escolha o tipo e toque nos horários (no computador dá para arrastar). <b>Rovya</b> fica aberto para qualquer pessoa agendar uma conversa de 1 hora em <a href="${LINK_AGENDA}" target="_blank" rel="noopener">rovyacreative.com.br/agendar</a>; <b>Pessoal</b> e <b>BNI</b> só bloqueiam. <b>Compromisso</b> cria, muda ou apaga reuniões direto no Google Agenda (o que mudar no Google aparece aqui ao voltar para esta aba). Rovya vale só para esta semana: <b>Liberar vagos</b> marca como Rovya todas as horas livres (confira e salve). Para tirar: ligue <b>Apagar</b>, escolha a categoria e toque nos horários (se o bloco repete toda semana, tira de todas).</p>
     <div class="semana${apagar ? ' lixeira' : ''}" id="hGrade"><div></div>${dias.map(d => `<div class="sd ${d === hoje() ? 'hj' : ''}">${new Date(d + 'T12:00').toLocaleDateString('pt-BR', { weekday: 'short' }).replace('.', '')}<b>${+d.slice(8)}</b></div>`).join('')}
       ${HORAS.map(h => `<div class="sh">${h}h</div>` + dias.map(d => {
         const k = d + '|' + h, c = cel[k], passou = inicioHora(d, h) + 36e5 <= agora;
@@ -688,7 +688,7 @@ async function horarios(sem, manter = {}, estado = {}) {
   $('#hApagar').onclick = () => {
     apagar = !apagar; grade.classList.toggle('lixeira', apagar);
     $('#hApagar').classList.toggle('ativo', apagar); $('#hApagar').setAttribute('aria-pressed', apagar);
-    if (apagar) toast(`Apagar ligado: toque nos horários ${BLOCOS[modo][0]} que quer tirar.`);
+    if (apagar) toast(`Apagar ligado: toque nos horários ${nomeModo()} que quer tirar.`);
   };
   // horas livres da semana (sem compromisso, Pessoal, BNI ou Rovya, e que ainda não passaram) viram Rovya para salvar
   $('#hVagos').onclick = () => {
@@ -696,6 +696,17 @@ async function horarios(sem, manter = {}, estado = {}) {
     grade.querySelectorAll('.sc:not(:disabled)').forEach(b => { if (!cel[b.dataset.k] && !novos[b.dataset.k]) { marcar(b, 'rovya'); q++; } });
     $('#hCorpo').querySelector('[data-modo=rovya]').click();   // tocar num vago marcado desmarca
     toast(q ? `${q} hora(s) vaga(s) marcadas como Rovya. Confira (tocar desmarca) e clique em Salvar.` : 'Nenhuma hora vaga nesta semana.');
+  };
+  const recarregar = ok => ok && horarios(n, novos, { modo, apagar });
+  const nomeModo = () => modo === 'compromisso' ? 'Compromisso' : BLOCOS[modo][0];
+  // compromisso de verdade: abre no formulário do CRM e a mudança vai direto para o Google (agenda "só para ver" não)
+  const soVer = e => e._tipo === 'outra' && (toast('Esse é de outra agenda (só para ver): mude no Google Agenda.'), true);
+  const abrirCompromisso = e => soVer(e) || editarEvento(e).then(recarregar);
+  const apagarCompromisso = async e => {
+    if (soVer(e) || !await confirma(`Apagar “${e.summary || 'compromisso'}” do Google Agenda?${e.attendees?.length ? ' Os convidados recebem o aviso de cancelamento.' : ''}`)) return;
+    try { await google('apagar', { id: e.id, agenda: e._agenda }); toast('Apagado do Google Agenda'); }
+    catch (err) { toast(semRede(err) ? 'Sem internet: precisa de conexão.' : err.message, true); }
+    recarregar(true);
   };
   const tirarHora = async b => {
     if (apagando) return toast('Aguarde: ainda tirando o horário anterior.');
@@ -710,10 +721,11 @@ async function horarios(sem, manter = {}, estado = {}) {
     if (apagar) {   // só a categoria escolhida: tocar num Pessoal com Rovya escolhido não apaga nada
       if (novos[b.dataset.k]) return novos[b.dataset.k] === modo && marcar(b, null);
       if (!c) return;
-      if (c.tipo === 'ocupado') return toast(`${c.e.summary || 'Compromisso'}: mude pela Agenda.`);
+      if (c.tipo === 'ocupado') return modo === 'compromisso' ? apagarCompromisso(c.e) : toast(`${c.e.summary || 'Esse horário'} é um compromisso: escolha Compromisso lá em cima para apagar.`);
       return c.tipo === modo ? tirarHora(b) : toast(`Esse horário é ${BLOCOS[c.tipo][0]}: escolha ${BLOCOS[c.tipo][0]} lá em cima para apagar.`);
     }
-    if (c) { if (c.tipo === 'ocupado') toast(`${c.e.summary || 'Compromisso'}: mude pela Agenda.`); else verBloco(c.e).then(ok => ok && horarios(n)); return; }
+    if (c) { if (c.tipo === 'ocupado') abrirCompromisso(c.e); else verBloco(c.e).then(recarregar); return; }
+    if (modo === 'compromisso') { const [d, h] = b.dataset.k.split('|'); novoEvento({ data: d, hora: doisDig(+h) + ':00', duracao: 60 }).then(recarregar); return; }
     pintar = novos[b.dataset.k] === modo ? null : modo; marcar(b, pintar);
     if (mouse) grade.dataset.arrastando = '1';
   };
@@ -722,6 +734,9 @@ async function horarios(sem, manter = {}, estado = {}) {
   grade.onkeydown = ev => { const b = ev.target.closest('.sc'); if (b && !b.disabled && (ev.key === 'Enter' || ev.key === ' ')) { ev.preventDefault(); tocar(b, false); } };
   const soltar = () => { if (!grade.isConnected) return removeEventListener('pointerup', soltar); delete grade.dataset.arrastando; };
   addEventListener('pointerup', soltar);
+  // voltou do Google Agenda (outra aba ou app): mostra o que mudou lá, sem perder o que está marcado aqui
+  const aoVoltar = () => { if (!grade.isConnected) return document.removeEventListener('visibilitychange', aoVoltar); if (document.visibilityState === 'visible' && !apagando && !$('#dlg').open) recarregar(true); };
+  document.addEventListener('visibilitychange', aoVoltar);
   $('#hSalvar').onclick = async () => {
     // horas seguidas do mesmo tipo no mesmo dia viram um evento só
     const blocos = [];
@@ -755,6 +770,12 @@ async function tirarDoBloco(e, a) {
   await google('editar', { id, agenda: ag, evento: { end: t(a) } });
   const { summary, description, transparency, visibility, extendedProperties } = e;
   return google('criar', { agenda: ag, evento: so({ summary, description, transparency, visibility, extendedProperties, start: t(b), end: t(fim), recurrence }) });
+}
+// compromisso do Google no formulário do CRM (mudar ou apagar); a mudança vai direto para o Google
+async function editarEvento(e, cs) {
+  cs ??= await listaClientes().catch(() => []);
+  const ini = new Date(e.start.dateTime), fim = new Date(e.end.dateTime);
+  return novoEvento({ titulo: e.summary, cliente_id: clienteDoEvento(e, cs)?.id || '', data: ini.toLocaleDateString('sv'), hora: ini.toTimeString().slice(0, 5), duracao: Math.round((fim - ini) / 6e4), local: e.location, notas: e.description }, e);
 }
 // horário marcado na semana (Rovya, Pessoal ou BNI): tirar só este dia ou todas as semanas
 async function verBloco(e) {
@@ -842,9 +863,7 @@ async function agenda() {
     if (ev.target.closest('[data-meet]')) return;
     const e = porId[el.dataset.ev]; if (!e.start.dateTime) { window.open(e.htmlLink, '_blank'); return; }
     if (tipoBloco(e)) { if (await verBloco(e)) agenda(); return; }
-    const ini = new Date(e.start.dateTime), fim = new Date(e.end.dateTime);
-    const ok = await novoEvento({ titulo: e.summary, cliente_id: clienteDoEvento(e, cs)?.id || '', data: ini.toLocaleDateString('sv'), hora: ini.toTimeString().slice(0, 5), duracao: Math.round((fim - ini) / 6e4), local: e.location, notas: e.description }, e);
-    if (ok) agenda();
+    if (await editarEvento(e, cs)) agenda();
   });
   if ($('#nEv')) $('#nEv').onclick = async () => { if (await novoEvento()) agenda(); };
   if ($('#cfgAg')) $('#cfgAg').onclick = async () => { if (await configurarAgendas()) agenda(); };
