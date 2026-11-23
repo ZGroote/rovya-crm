@@ -618,14 +618,14 @@ async function novoEvento(val = {}, ev = null) {
    Rovya = período aberto para novos clientes: evento livre (transparent) com crm_reserva=1 na agenda profissional; a página
    rovyacreative.com.br/agendar divide em conversas de crm_slot minutos e só mostra o que não bate com nada da agenda.
    Pessoal e BNI só ocupam o horário (o site não oferece): Pessoal vai para a agenda pessoal (ou fica privado na profissional), BNI na profissional.
-   Cada bloco vale só para a semana em que foi marcado: a Sabrina monta a rotina semana a semana. Blocos que já repetiam
-   (versão antiga) saem com "Tirar todas as semanas". */
+   Rovya vale só para a semana marcada (a Sabrina abre o público semana a semana); Pessoal e BNI podem repetir toda semana.
+   Modo "Apagar": cada toque tira aquela hora do bloco (encurta ou divide); bloco que repete toda semana perde a hora em todas. */
 const DURACAO_CONVERSA = 60;
 const BLOCOS = { rovya: ['Rovya', 'aberto para agendarem pelo site'], pessoal: ['Pessoal', 'só bloqueia; ninguém vê o que é'], bni: ['BNI', 'reunião do BNI'] };
 const HORAS = Array.from({ length: 16 }, (_, i) => i + 6); // blocos de 1 h, das 6h às 22h
 const tipoBloco = e => reserva(e) ? 'rovya' : BLOCOS[e.extendedProperties?.private?.crm_bloco] ? e.extendedProperties.private.crm_bloco : null;
 const doisDig = h => String(h).padStart(2, '0');
-const eventoBloco = (tipo, dia, h0, h1) => {
+const eventoBloco = (tipo, dia, h0, h1, repetir) => {
   const tz = 'America/Sao_Paulo';
   const e = tipo === 'rovya'
     ? { summary: 'Reservado · novos clientes', transparency: 'transparent', description: 'Horário aberto para novos clientes agendarem pelo site (rovyacreative.com.br/agendar). Criado pelo CRM.',
@@ -633,9 +633,10 @@ const eventoBloco = (tipo, dia, h0, h1) => {
     : { summary: BLOCOS[tipo][0], description: 'Bloqueado pelo CRM (Horários da semana).', extendedProperties: { private: { crm_bloco: tipo } },
       ...(tipo === 'pessoal' && !TEM_PESSOAL ? { visibility: 'private' } : {}) };
   e.start = { dateTime: `${dia}T${doisDig(h0)}:00:00`, timeZone: tz }; e.end = { dateTime: `${dia}T${doisDig(h1)}:00:00`, timeZone: tz };
+  if (repetir && tipo !== 'rovya') e.recurrence = ['RRULE:FREQ=WEEKLY'];
   return e;
 };
-async function horarios(sem) {
+async function horarios(sem, manter = {}) {
   const n = Math.max(0, Math.min(52, parseInt(sem) || 0));
   const seg = new Date(); seg.setHours(0, 0, 0, 0); seg.setDate(seg.getDate() - (seg.getDay() + 6) % 7 + 7 * n);
   const dias = Array.from({ length: 7 }, (_, i) => { const d = new Date(seg); d.setDate(d.getDate() + i); return d.toLocaleDateString('sv'); });
@@ -658,17 +659,18 @@ async function horarios(sem) {
       if (ini < a + 36e5 && fim > a && (!cel[k] || cel[k].tipo === 'rovya')) cel[k] = { tipo, e };
     }
   }
-  const novos = {}; let modo = 'rovya', pintar = null;
+  const novos = { ...manter }; let modo = 'rovya', pintar = null, apagando = false;
   $('#hSub').textContent = `${curto(dias[0])} a ${curto(dias[6])}`;
   $('#hCorpo').innerHTML = `<section class="card horarios">
-    <div class="h-barra"><div class="modos" role="radiogroup" aria-label="O que marcar">${Object.entries(BLOCOS).map(([k, [nome, dica]]) => `<button type="button" class="chip m-${k} ${k === modo ? 'ativo' : ''}" data-modo="${k}" role="radio" aria-checked="${k === modo}" title="${dica}"><i></i>${nome}</button>`).join('')}</div>
+    <div class="h-barra"><div class="modos" role="radiogroup" aria-label="O que marcar">${Object.entries(BLOCOS).map(([k, [nome, dica]]) => `<button type="button" class="chip m-${k} ${k === modo ? 'ativo' : ''}" data-modo="${k}" role="radio" aria-checked="${k === modo}" title="${dica}"><i></i>${nome}</button>`).join('')}<button type="button" class="chip m-apagar" data-modo="apagar" role="radio" aria-checked="false" title="cada toque tira aquela hora"><i></i>Apagar</button></div>
+      <label class="h-rep"><input type="checkbox" id="hRep"> Repetir Pessoal e BNI toda semana</label>
       <div class="h-nav">${n ? `<a class="bt peq sec" href="#/horarios/${n - 1}" aria-label="Semana anterior">‹</a>` : ''}<a class="bt peq sec" href="#/horarios/${n + 1}" aria-label="Próxima semana">›</a></div></div>
-    <p class="mute h-dica">Escolha o tipo e toque nos horários (no computador dá para arrastar). <b>Rovya</b> fica aberto para qualquer pessoa agendar uma conversa de 1 hora em <a href="${LINK_AGENDA}" target="_blank" rel="noopener">rovyacreative.com.br/agendar</a>; <b>Pessoal</b> e <b>BNI</b> só bloqueiam. Toque num horário já marcado para tirar.</p>
+    <p class="mute h-dica">Escolha o tipo e toque nos horários (no computador dá para arrastar). <b>Rovya</b> fica aberto para qualquer pessoa agendar uma conversa de 1 hora em <a href="${LINK_AGENDA}" target="_blank" rel="noopener">rovyacreative.com.br/agendar</a>; <b>Pessoal</b> e <b>BNI</b> só bloqueiam. Rovya vale só para esta semana. Com <b>Apagar</b>, cada toque tira aquela hora (se o bloco repete toda semana, tira de todas).</p>
     <div class="semana" id="hGrade"><div></div>${dias.map(d => `<div class="sd ${d === hoje() ? 'hj' : ''}">${new Date(d + 'T12:00').toLocaleDateString('pt-BR', { weekday: 'short' }).replace('.', '')}<b>${+d.slice(8)}</b></div>`).join('')}
       ${HORAS.map(h => `<div class="sh">${h}h</div>` + dias.map(d => {
         const k = d + '|' + h, c = cel[k], passou = inicioHora(d, h) + 36e5 <= agora;
-        const rot = c ? (c.tipo === 'ocupado' ? c.e.summary || 'Ocupado' : BLOCOS[c.tipo][0]) : '';
-        return `<button type="button" class="sc ${c ? 'k-' + c.tipo : ''}" data-k="${k}" ${passou ? 'disabled' : ''} title="${esc(`${curto(d)}, ${h}h–${h + 1}h${rot ? ' · ' + rot : ''}`)}">${esc(rot)}</button>`;
+        const v = !c && novos[k], rot = c ? (c.tipo === 'ocupado' ? c.e.summary || 'Ocupado' : BLOCOS[c.tipo][0]) : v ? BLOCOS[v][0] : '';
+        return `<button type="button" class="sc ${c ? 'k-' + c.tipo : v ? `k-${v} novo` : ''}" data-k="${k}" ${passou ? 'disabled' : ''} title="${esc(`${curto(d)}, ${h}h–${h + 1}h${rot ? ' · ' + rot : ''}`)}">${esc(rot)}</button>`;
       }).join('')).join('')}</div>
     <div class="acoes h-salvar"><button class="bt" id="hSalvar" disabled>Salvar</button><span class="mute" id="hConta"></span></div></section>`;
   const grade = $('#hGrade');
@@ -681,8 +683,21 @@ async function horarios(sem) {
     const b = ev.target.closest('[data-modo]'); if (!b) return; modo = b.dataset.modo;
     $('#hCorpo').querySelectorAll('[data-modo]').forEach(x => { x.classList.toggle('ativo', x === b); x.setAttribute('aria-checked', x === b); });
   };
+  const tirarHora = async b => {
+    if (apagando) return toast('Aguarde: ainda tirando o horário anterior.');
+    apagando = true; b.classList.add('apagando');
+    const [d, h] = b.dataset.k.split('|'), c = cel[b.dataset.k];
+    try { await tirarDoBloco(c.e, inicioHora(d, +h)); toast(c.e.recurringEventId ? 'Tirado de todas as semanas' : 'Tirado'); }
+    catch (e) { toast(semRede(e) ? 'Sem internet: precisa de conexão.' : e.message, true); }
+    horarios(n, novos);
+  };
   const tocar = (b, mouse) => {
     const c = cel[b.dataset.k];
+    if (modo === 'apagar') {
+      if (novos[b.dataset.k]) return marcar(b, null);
+      if (!c) return;
+      return c.tipo === 'ocupado' ? toast(`${c.e.summary || 'Compromisso'}: mude pela Agenda.`) : tirarHora(b);
+    }
     if (c) { if (c.tipo === 'ocupado') toast(`${c.e.summary || 'Compromisso'}: mude pela Agenda.`); else verBloco(c.e).then(ok => ok && horarios(n)); return; }
     pintar = novos[b.dataset.k] === modo ? null : modo; marcar(b, pintar);
     if (mouse) grade.dataset.arrastando = '1';
@@ -699,15 +714,32 @@ async function horarios(sem) {
       const t = novos[d + '|' + h]; if (!t) continue;
       const u = blocos.at(-1); if (u && u.d === d && u.t === t && u.h1 === h) u.h1++; else blocos.push({ d, t, h0: h, h1: h + 1 });
     }
-    $('#hSalvar').disabled = true; $('#hSalvar').textContent = 'Salvando…';
+    const repetir = $('#hRep').checked; $('#hSalvar').disabled = true; $('#hSalvar').textContent = 'Salvando…';
     let feitos = 0;
     for (const b of blocos) {
-      try { await google('criar', { evento: eventoBloco(b.t, b.d, b.h0, b.h1), agenda: b.t === 'pessoal' && TEM_PESSOAL ? 'pessoal' : 'profissional' }); feitos++; }
+      try { await google('criar', { evento: eventoBloco(b.t, b.d, b.h0, b.h1, repetir), agenda: b.t === 'pessoal' && TEM_PESSOAL ? 'pessoal' : 'profissional' }); feitos++; }
       catch (e) { toast((feitos ? `${feitos} salvo(s); parou: ` : '') + (semRede(e) ? 'sem internet.' : e.message), true); return horarios(n); }
     }
-    toast(`Salvo nesta semana.${blocos.some(b => b.t === 'rovya') ? ' Os horários Rovya já aparecem na agenda do site.' : ''}`);
+    toast(`Salvo${repetir && blocos.some(b => b.t !== 'rovya') ? ' (Pessoal e BNI toda semana; Rovya só nesta)' : ' nesta semana'}.${blocos.some(b => b.t === 'rovya') ? ' Os horários Rovya já aparecem na agenda do site.' : ''}`);
     horarios(n);
   };
+}
+// tira a hora [a, a+1h) de um bloco: apaga, encurta ou divide em dois. Bloco que repete toda semana muda a série inteira
+// (o PATCH vazio devolve a série: as horas desta semana viram as da série pelo deslocamento até o primeiro dia dela)
+async function tirarDoBloco(e, a) {
+  const tz = 'America/Sao_Paulo', b = a + 36e5, ag = e._agenda, ini = Date.parse(e.start.dateTime), fim = Date.parse(e.end.dateTime);
+  let id = e.id, desloc = 0, recurrence;
+  if (e.recurringEventId) {
+    const m = await google('editar', { id: e.recurringEventId, agenda: ag, evento: {} });
+    id = m.id; recurrence = m.recurrence; desloc = Date.parse(m.start.dateTime) - Date.parse(e.originalStartTime?.dateTime || e.start.dateTime);
+  }
+  const t = x => ({ dateTime: new Date(x + desloc).toISOString(), timeZone: tz });
+  if (ini >= a && fim <= b) return google('apagar', { id, agenda: ag });
+  if (ini >= a) return google('editar', { id, agenda: ag, evento: { start: t(b) } });
+  if (fim <= b) return google('editar', { id, agenda: ag, evento: { end: t(a) } });
+  await google('editar', { id, agenda: ag, evento: { end: t(a) } });
+  const { summary, description, transparency, visibility, extendedProperties } = e;
+  return google('criar', { agenda: ag, evento: so({ summary, description, transparency, visibility, extendedProperties, start: t(b), end: t(fim), recurrence }) });
 }
 // horário marcado na semana (Rovya, Pessoal ou BNI): tirar só este dia ou todas as semanas
 async function verBloco(e) {

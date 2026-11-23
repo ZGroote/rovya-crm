@@ -240,7 +240,7 @@ body.sem-rede #main::before{content:"Sem internet · mostrando os dados salvos n
 .horarios .h-barra{display:flex;flex-wrap:wrap;align-items:center;gap:10px 16px}
 .horarios .modos{display:flex;flex-wrap:wrap;gap:6px}
 .horarios .modos i{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:6px;vertical-align:-1px;border:1px solid}
-.m-rovya i{background:#b08a4a55;border-color:var(--gold)}.m-pessoal i{background:#3f7a5240;border-color:var(--ok)}.m-bni i{background:#8e0f1d33;border-color:var(--wine)}
+.m-rovya i{background:#b08a4a55;border-color:var(--gold)}.m-pessoal i{background:#3f7a5240;border-color:var(--ok)}.m-bni i{background:#8e0f1d33;border-color:var(--wine)}.m-apagar i{background:none;border-color:var(--bad);border-style:dashed}.chip.m-apagar.ativo{border-color:var(--bad);color:var(--bad)}.sc.apagando{opacity:.45;pointer-events:none}
 .horarios .h-rep{display:flex;align-items:center;gap:6px;font-size:.85rem;color:var(--mute);cursor:pointer}
 .horarios .h-nav{display:flex;gap:6px;margin-left:auto}
 .horarios .h-dica{font-size:.85rem;margin:12px 0}
