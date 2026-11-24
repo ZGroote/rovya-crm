@@ -181,8 +181,9 @@ $('olho').onclick=()=>{const s=$('senha'),v=s.type==='password';s.type=v?'text':
     s.fillStyle=g; s.fillRect(0,0,64,64); }
   const novo=baixo=>({x:Math.random(),y:baixo?1.05:Math.random(),r:2+Math.random()*Math.random()*14,v:.006+Math.random()*.018,
     d:(Math.random()-.5)*.01,f:Math.random()*6.28,fv:.6+Math.random()*1.6,a:.25+Math.random()*.5});
-  const medir=()=>{W=c.width=c.clientWidth;H=c.height=c.clientHeight;
-    const n=Math.round(Math.min(32,W*H/30000)); while(ps.length<n)ps.push(novo(false)); ps.length=n;};
+  const ESC=.5; // meia resolução: são pontos borrados, a olho nu fica igual e custa 1/4 para desenhar
+  const medir=()=>{W=c.width=Math.round(c.clientWidth*ESC);H=c.height=Math.round(c.clientHeight*ESC);
+    const n=Math.round(Math.min(32,W*H/(30000*ESC*ESC))); while(ps.length<n)ps.push(novo(false)); ps.length=n;};
   medir(); addEventListener('resize',medir);
   const quadro=t=>{
     if(t-ultimo<30) return requestAnimationFrame(quadro); // ~30 quadros/s, o ritmo do vídeo: a tela não é refeita 60x por segundo à toa
@@ -190,7 +191,7 @@ $('olho').onclick=()=>{const s=$('senha'),v=s.type==='password';s.type=v?'text':
     for(const p of ps){
       p.y-=p.v*dt; p.x+=p.d*dt; p.f+=p.fv*dt;
       if(p.y<-.05) Object.assign(p,novo(true));
-      const a=p.a*(.55+.45*Math.sin(p.f))*Math.min(1,(1.05-p.y)*4), R=p.r;
+      const a=p.a*(.55+.45*Math.sin(p.f))*Math.min(1,(1.05-p.y)*4), R=p.r*ESC;
       x.globalAlpha=Math.max(0,a); x.drawImage(spr,p.x*W-R,p.y*H-R,R*2,R*2);
     }
     x.globalAlpha=1;
