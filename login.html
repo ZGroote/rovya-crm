@@ -27,23 +27,21 @@ body{background:var(--bg);color:var(--ink);font:300 15px/1.5 Inter,system-ui,san
 [hidden]{display:none!important}
 
 .palco{position:fixed;inset:0;overflow:hidden;overflow:clip;isolation:isolate} /* clip: o foco no campo não rola a cena para o lado */
-.camera{position:absolute;inset:-2%;z-index:-3;transform:translate3d(calc(var(--mx,0)*-10px),calc(var(--my,0)*-6px),0);transition:transform 1.4s var(--ease)}
+.camera{position:absolute;inset:0;z-index:-3}
 .camera video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:50% 35%;background:var(--bg)}
 #calma{animation:respira 2.6s var(--ease) both}
 #petala{opacity:0;transition:opacity .35s}
-@keyframes respira{from{scale:1.1;filter:brightness(.3) blur(6px)}to{scale:1;filter:none}}
+@keyframes respira{from{opacity:0;scale:1.06}to{opacity:1;scale:1}} /* leve: só opacidade e escala (sem filtro no vídeo) */
 .vinheta{position:absolute;inset:0;z-index:-1;pointer-events:none;
   background:radial-gradient(ellipse 70% 80% at 50% 38%,transparent 40%,rgba(8,4,5,.55) 100%),
              linear-gradient(0deg,rgba(8,4,5,.75) 0%,transparent 34%),
              linear-gradient(180deg,rgba(8,4,5,.55) 0%,transparent 14%)}
 /* brilhos dourados desenhados em código: nunca repetem, então o loop do vídeo não aparece */
-.poeira{position:absolute;inset:0;width:100%;height:100%;z-index:-2;pointer-events:none;mix-blend-mode:screen}
-.nevoa{position:absolute;z-index:-2;left:-30%;right:-30%;bottom:18%;height:30%;pointer-events:none;opacity:.28;filter:blur(30px);mix-blend-mode:screen;
+.poeira{position:absolute;inset:0;width:100%;height:100%;z-index:-2;pointer-events:none}
+.nevoa{position:absolute;z-index:-2;left:-30%;right:-30%;bottom:18%;height:30%;pointer-events:none;opacity:.22;
   background:radial-gradient(ellipse 22% 38% at 20% 60%,rgba(220,200,185,.5),transparent 70%),
              radial-gradient(ellipse 18% 30% at 58% 50%,rgba(220,200,185,.4),transparent 70%),
-             radial-gradient(ellipse 25% 36% at 88% 62%,rgba(220,200,185,.45),transparent 70%);
-  animation:nevoa 53s linear infinite alternate}
-@keyframes nevoa{from{translate:-8% 0}to{translate:8% 0}}
+             radial-gradient(ellipse 25% 36% at 88% 62%,rgba(220,200,185,.45),transparent 70%)} /* parada: a névoa do vídeo já se mexe */
 
 .topo{position:absolute;z-index:4;top:0;left:0;right:0;display:flex;align-items:center;justify-content:space-between;padding:26px clamp(20px,5vw,72px)}
 .marca{display:flex;align-items:center;gap:12px;color:var(--ink);text-decoration:none}
@@ -55,8 +53,7 @@ body{background:var(--bg);color:var(--ink);font:300 15px/1.5 Inter,system-ui,san
 .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}
 
 .barra{position:absolute;z-index:5;left:50%;bottom:clamp(20px,5vh,56px);width:min(720px,calc(100vw - 40px));translate:-50% 0;
-  padding:18px 18px 12px 22px;border-radius:26px;background:rgba(22,9,12,.5);
-  backdrop-filter:blur(18px) saturate(1.2);-webkit-backdrop-filter:blur(18px) saturate(1.2);
+  padding:18px 18px 12px 22px;border-radius:26px;background:rgba(22,9,12,.76); /* sem desfoque de fundo: sobre vídeo ele é refeito a cada quadro */
   box-shadow:0 30px 70px -24px rgba(0,0,0,.85),inset 0 1px 0 rgba(255,240,215,.07)}
 .barra::before{content:"";position:absolute;inset:0;border-radius:inherit;padding:1px;pointer-events:none;
   background:linear-gradient(100deg,rgba(240,214,164,.5),rgba(212,173,110,.08) 35%,rgba(212,173,110,.08) 70%,rgba(142,15,29,.65));
@@ -93,8 +90,7 @@ input:focus{border-color:var(--gold);background:rgba(8,4,5,.7);box-shadow:0 0 0 
 @keyframes treme{20%{translate:-10px 0}45%{translate:8px 0}70%{translate:-4px 0}}
 
 /* saída: some a interface, a pétala cai, a luz se abre como um véu */
-.saindo .topo,.saindo .barra,.saindo .poeira,.saindo .nevoa{opacity:0!important;filter:blur(6px);transition:opacity .5s,filter .5s;animation:none}
-.saindo .camera{transform:none}
+.saindo .topo,.saindo .barra,.saindo .poeira,.saindo .nevoa{opacity:0!important;transition:opacity .5s;animation:none}
 .saindo #petala{opacity:1}
 .luz{position:fixed;inset:0;z-index:21;pointer-events:none;opacity:0;background:radial-gradient(ellipse at center,#fff3df,#e9d7bd 40%,#0b0607 100%)}
 .luz.acesa{opacity:1;transition:opacity .6s ease}
@@ -130,9 +126,9 @@ input:focus{border-color:var(--gold);background:rgba(8,4,5,.7);box-shadow:0 0 0 
 <main class="palco" id="palco">
   <div class="camera" aria-hidden="true">
     <video id="calma" autoplay muted loop playsinline preload="auto" poster="img/login-rosa-calma.webp">
-      <source src="img/login-rosa-calma.webm" type="video/webm"><source src="img/login-rosa-calma.mp4" type="video/mp4"></video>
+      <source src="img/login-rosa-calma.mp4" type="video/mp4"></video>
     <video id="petala" muted playsinline preload="none">
-      <source src="img/login-rosa-petala.webm" type="video/webm"><source src="img/login-rosa-petala.mp4" type="video/mp4"></video>
+      <source src="img/login-rosa-petala.mp4" type="video/mp4"></video>
   </div>
   <div class="nevoa" aria-hidden="true"></div>
   <canvas class="poeira" id="brilhos" aria-hidden="true"></canvas>
@@ -173,28 +169,31 @@ $('data').innerHTML=new Date().toLocaleDateString('pt-BR',{weekday:'long',day:'n
 // leve: o vídeo da pétala (a saída) só baixa quando ela toca no formulário
 $('f').addEventListener('focusin',()=>{ const p=$('petala'); p.preload='auto'; p.load(); },{once:true});
 $('olho').onclick=()=>{const s=$('senha'),v=s.type==='password';s.type=v?'text':'password';$('olho').textContent=v?'OCULTAR':'VER';$('olho').setAttribute('aria-label',v?'Ocultar senha':'Mostrar senha')};
-if(!reduzido&&matchMedia('(pointer:fine)').matches){
-  addEventListener('pointermove',e=>{const p=$('palco').style;p.setProperty('--mx',(e.clientX/innerWidth-.5).toFixed(3));p.setProperty('--my',(e.clientY/innerHeight-.5).toFixed(3))});
-}
 
 /* ---------- brilhos dourados que sobem e cintilam ---------- */
 (()=>{
   if(reduzido) return;
-  const c=$('brilhos'), x=c.getContext('2d'); let W,H,dpr,ps=[],ultimo=0;
+  const c=$('brilhos'), x=c.getContext('2d'); let W,H,ps=[],ultimo=0;
+  // leve: o brilho é desenhado uma vez numa imagem pequena e só carimbado (sem gradiente por quadro), em 1x
+  const spr=document.createElement('canvas'); spr.width=spr.height=64;
+  { const s=spr.getContext('2d'), g=s.createRadialGradient(32,32,0,32,32,32);
+    g.addColorStop(0,'rgba(255,226,170,1)'); g.addColorStop(.45,'rgba(240,200,130,.45)'); g.addColorStop(1,'rgba(240,200,130,0)');
+    s.fillStyle=g; s.fillRect(0,0,64,64); }
   const novo=baixo=>({x:Math.random(),y:baixo?1.05:Math.random(),r:2+Math.random()*Math.random()*14,v:.006+Math.random()*.018,
     d:(Math.random()-.5)*.01,f:Math.random()*6.28,fv:.6+Math.random()*1.6,a:.25+Math.random()*.5});
-  const medir=()=>{dpr=Math.min(devicePixelRatio||1,2);W=c.width=c.clientWidth*dpr;H=c.height=c.clientHeight*dpr;
-    const n=Math.round(Math.min(46,W*H/(dpr*dpr)/26000)); while(ps.length<n)ps.push(novo(false)); ps.length=n;};
+  const medir=()=>{W=c.width=c.clientWidth;H=c.height=c.clientHeight;
+    const n=Math.round(Math.min(32,W*H/30000)); while(ps.length<n)ps.push(novo(false)); ps.length=n;};
   medir(); addEventListener('resize',medir);
   const quadro=t=>{
+    if(t-ultimo<30) return requestAnimationFrame(quadro); // ~30 quadros/s, o ritmo do vídeo: a tela não é refeita 60x por segundo à toa
     const dt=Math.min(.05,(t-ultimo)/1000||0); ultimo=t; x.clearRect(0,0,W,H);
     for(const p of ps){
       p.y-=p.v*dt; p.x+=p.d*dt; p.f+=p.fv*dt;
       if(p.y<-.05) Object.assign(p,novo(true));
-      const a=p.a*(.55+.45*Math.sin(p.f))*Math.min(1,(1.05-p.y)*4), R=p.r*dpr, px=p.x*W, py=p.y*H;
-      const g=x.createRadialGradient(px,py,0,px,py,R); g.addColorStop(0,`rgba(255,226,170,${a})`); g.addColorStop(.45,`rgba(240,200,130,${a*.45})`); g.addColorStop(1,'rgba(240,200,130,0)');
-      x.fillStyle=g; x.beginPath(); x.arc(px,py,R,0,6.283); x.fill();
+      const a=p.a*(.55+.45*Math.sin(p.f))*Math.min(1,(1.05-p.y)*4), R=p.r;
+      x.globalAlpha=Math.max(0,a); x.drawImage(spr,p.x*W-R,p.y*H-R,R*2,R*2);
     }
+    x.globalAlpha=1;
     if(!document.body.classList.contains('saindo')) requestAnimationFrame(quadro);
   };
   requestAnimationFrame(quadro);
@@ -212,15 +211,13 @@ function pontoNaTela(v,pt){ // ponto do vídeo (object-fit:cover) → posição 
   return {x:r.left+(r.width-w)*pos[0]+pt.x*w, y:r.top+(r.height-h)*pos[1]+pt.y*h};
 }
 function veu(px,py,D=2300){return new Promise(fim=>{
-  const c=$('onda'), x=c.getContext('2d'), luz=document.querySelector('.luz'), dpr=Math.min(devicePixelRatio||1,2);
+  const c=$('onda'), x=c.getContext('2d'), luz=document.querySelector('.luz'), dpr=1; // gradiente suave: 1x basta
   const W=innerWidth*dpr, H=innerHeight*dpr, X=px*dpr, Y=py*dpr, M=Math.hypot(Math.max(X,W-X),Math.max(Y,H-Y));
   const t0=performance.now(); let fundiu=false;
   const ease=u=>1-Math.pow(1-u,3), suave=(a,b,u)=>{u=Math.max(0,Math.min(1,(u-a)/(b-a)));return u*u*(3-2*u);};
-  const cena=[$('petala'),$('calma')];
   c.width=W; c.height=H;
   (function q(){
     const t=Math.min(1,(performance.now()-t0)/D), e=ease(t), R=e*M*1.4+2, asp=.3+.7*Math.pow(e,1.3), a=suave(.05,.9,t);
-    cena.forEach(el=>el.style.filter=`blur(${e*7}px) brightness(${1+e*.35})`);
     x.clearRect(0,0,W,H); x.save(); x.translate(X,Y); x.scale(1,asp);
     const g=x.createRadialGradient(0,0,0,0,0,R);
     g.addColorStop(0,`rgba(255,243,223,${.95*a})`); g.addColorStop(.35,`rgba(245,230,205,${.8*a})`);

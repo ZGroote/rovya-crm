@@ -14,7 +14,7 @@ export const createClient = () => ({ auth: {
     ? (S.session = { access_token: 'tk', expires_at: Date.now() / 1000 + 3600, user: { email, user_metadata: { trocar_senha: !!S.trocar } } }, g(), { error: null })
     : { error: { message: 'Invalid login credentials' } },
   updateUser: async ({ password, data }) => { S.nova = password; S.session.user.user_metadata = data; g(); return { error: null }; },
-  signOut: async () => { S.session = null; g(); } } });"""
+  signOut: async (o) => { S.escopo = o?.scope; S.session = null; g(); } } });"""
 ent = lambda i, st, **k: {'id': 'x%d' % i, 'titulo': 'Entrega %d' % i, 'status': st, 'prazo': None, 'formato': None, **k}
 BASE = {'cliente': {'nome': 'Paulo Mendes', 'empresa': 'Imobiliária Horizonte', 'estrategia': '## Posicionamento\nAlto padrão, **sem pressa**.'},
         'projetos': [{'id': 'p1', 'nome': 'Gestão de comunicação', 'status': 'ativo', 'entrega_prevista': '2026-12-20', 'etapas': [
@@ -114,7 +114,7 @@ with sync_playwright() as p:
     ok(pg.locator('.abas .on').get_attribute('data-a') == 'solicitacoes', 'recarregar volta na mesma aba')
     ok(pg.evaluate('document.documentElement.scrollWidth') <= 390, 'celular: sem rolagem para o lado')
     pg.screenshot(path='testes/saida/portal_celular.png', full_page=True)
-    pg.click('#sair'); pg.wait_for_selector('#vEntrar:not([hidden])'); ok(True, 'sair volta para o login')
+    pg.click('#sair'); pg.wait_for_selector('#vEntrar:not([hidden])'); ok(pg.evaluate('window.__S.escopo') == 'local', 'sair volta para o login e só sai do portal (não derruba o CRM)')
     estado['sem_acesso'] = True; pg.evaluate('window.__S.trocar = false'); pg.fill('#fEntrar [name=email]', 'paulo@x.com'); pg.fill('#fEntrar [name=senha]', 'certa'); pg.click('#fEntrar .lg-entrar')
     pg.wait_for_selector('#mEntrar:not(:empty)'); ok('não tem acesso' in pg.inner_text('#mEntrar') and pg.evaluate('window.__S.session') is None, 'login sem vínculo: avisa e desloga')
 

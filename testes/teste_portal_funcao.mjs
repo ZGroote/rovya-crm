@@ -111,6 +111,13 @@ const chamar = async (quem, corpo) => {
 // login
 let r = await chamar(null, { acao: 'dados' }); ok(r.s === 401, 'sem login: 401');
 r = await chamar('u3', { acao: 'dados' }); ok(r.s === 403 && r.j.sem_acesso, 'login sem vínculo com cliente: não vê nada');
+ok(/Fale com a Rovya/.test(r.j.erro), 'login solto: manda falar com a Rovya');
+// quem administra entra no portal com o mesmo login do CRM e escolhe o cliente
+r = await chamar('adm', { acao: 'dados' }); ok(r.s === 200 && r.j.admin && r.j.clientes.length === 2 && r.j.cliente_id === C1 && r.j.cliente.nome === 'Paulo Mendes', 'conta do CRM no portal: entra e vê o primeiro cliente, com a lista para escolher');
+r = await chamar('adm', { acao: 'dados', cliente_id: C2 }); ok(r.s === 200 && r.j.cliente_id === C2 && r.j.projetos[0].nome === 'Projeto da Clínica', 'conta do CRM: escolhe outro cliente e vê o portal dele');
+r = await chamar('adm', { acao: 'dados', cliente_id: 'lixo' }); ok(r.s === 200 && r.j.cliente_id === C1, 'conta do CRM: cliente inválido cai no primeiro');
+r = await chamar(['admfa', 'aal1'], { acao: 'dados' }); ok(r.s === 403 && r.j.sem_acesso, 'conta do CRM com verificação em duas etapas sem o código: não entra');
+r = await chamar('u1', { acao: 'dados', cliente_id: C2 }); ok(r.s === 200 && !r.j.admin && !r.j.clientes && r.j.cliente.nome === 'Paulo Mendes', 'cliente mandando o id de outro cliente continua vendo só o dele');
 
 // dados do cliente
 r = await chamar('u1', { acao: 'dados' });

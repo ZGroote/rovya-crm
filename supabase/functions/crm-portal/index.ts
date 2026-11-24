@@ -174,12 +174,20 @@ Deno.serve(async req => {
       if (!await eAdmin(u)) return json({ erro: 'Sem permissão.' }, 403);
       const [r, s] = await admin(b); return json(r, s);
     }
+    // cliente: o vínculo do próprio login manda (cliente_id enviado é ignorado). Quem administra entra com o mesmo login do CRM
+    // e escolhe de qual cliente ver (cliente_id); sem escolha, o primeiro da lista.
     const { data: acesso } = await db.from('crm_portal').select('cliente_id').eq('user_id', u.user.id).maybeSingle();
-    if (!acesso) return json({ erro: 'Este login ainda não tem acesso ao portal. Fale com a Rovya.', sem_acesso: true }, 403);
-    const cid = acesso.cliente_id as string;
+    let cid = acesso?.cliente_id as string, extra = {};
+    if (!acesso) {
+      if (!await eAdmin(u)) return json({ erro: 'Este login ainda não tem acesso ao portal. Fale com a Rovya.', sem_acesso: true }, 403);
+      const { data: cs } = await db.from('crm_clientes').select('id,nome,empresa').order('nome');
+      if (!cs?.length) return json({ erro: 'Nenhum cliente cadastrado ainda.' }, 404);
+      cid = cs.some(x => x.id === b.cliente_id) ? String(b.cliente_id) : cs[0].id;
+      extra = { admin: true, cliente_id: cid, clientes: cs.map(x => ({ id: x.id, nome: x.empresa ? `${x.empresa} · ${x.nome}` : x.nome })) };
+    }
     if (b.acao === 'dados') {
-      await db.from('crm_portal').update({ ultimo_acesso: new Date().toISOString() }).eq('user_id', u.user.id);
-      return json(await dados(cid));
+      if (acesso) await db.from('crm_portal').update({ ultimo_acesso: new Date().toISOString() }).eq('user_id', u.user.id);
+      return json({ ...await dados(cid), ...extra });
     }
     const { data: c } = await db.from('crm_clientes').select('nome,empresa').eq('id', cid).maybeSingle();
     const nome = c?.empresa || c?.nome || 'Cliente';
