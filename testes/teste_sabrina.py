@@ -57,7 +57,9 @@ with sync_playwright() as p:
         pg.goto('http://localhost:8777/_mock.html#/funil'); pg.wait_for_selector('.sab-bt'); pg.wait_for_timeout(2600)
         menu = pg.locator('#nav a').all_inner_texts(); menu = [m.split('\n')[-1].strip() for m in menu]
         ok(menu[-3:] == ['Configurações', 'Assistente', 'Figurinhas'], f'[{tela}] menu: Assistente entre Configurações e Figurinhas')
-        ok(pg.locator('.sab-bt video').evaluate('v => v.src.endsWith("sabrina-aceno.webm") && !v.paused'), f'[{tela}] Sabrina acenando no canto')
+        quadro = lambda: pg.locator('.sab-bt canvas.sab-base').evaluate('c => c.toDataURL()')
+        q1 = quadro(); pg.wait_for_timeout(500)
+        ok(pg.locator('video').count() == 0 and q1 != quadro(), f'[{tela}] Sabrina acenando no canto (canvas animado, sem <video>: o Opera não põe o botão pop-out)')
         chamadas = lambda: [x for x in pg.evaluate('window.__ev') if x.get('acao') == 'chat']
         ok(not chamadas(), f'[{tela}] não gasta IA antes de abrir')
         pg.click('.sab-bt'); pg.wait_for_timeout(250)
@@ -78,7 +80,7 @@ with sync_playwright() as p:
         if tela == 'pc': acoes(pg, ctx, chamadas)
         ctx.close()
     ctx = b.new_context(reduced_motion='reduce'); pg = ctx.new_page(); pg.goto('http://localhost:8777/_mock.html#/funil'); pg.wait_for_selector('.sab-bt'); pg.wait_for_timeout(2200)
-    ok(pg.locator('.sab-bt video').count() == 0 and pg.locator('.sab-bt img.sab-base').count() == 1, 'menos movimento: imagem parada')
+    ok(pg.locator('.sab-bt canvas').count() == 0 and pg.locator('.sab-bt img.sab-base').count() == 1, 'menos movimento: imagem parada')
     pg.goto('http://localhost:8777/_mock.html?copia=1#/funil'); pg.wait_for_timeout(1500); ok(pg.locator('.sab-canto').count() == 0, 'cópia completa (quadro invisível): sem a Sabrina')
     b.close()
 print('ERROS:', erros or 'nenhum'); sys.exit(1 if erros else 0)

@@ -104,6 +104,7 @@ Deno.serve(async req => {
     // ---- reservar ----
     if (b.site) return json({ ok: true }); // campo escondido preenchido: robô
     const nome = txt(b.nome, 120), email = txt(b.email, 160).toLowerCase(), telefone = txt(b.telefone, 40), empresa = txt(b.empresa, 120), mensagem = txt(b.mensagem, 2000);
+    const jaCliente = b.cliente === true, assunto = jaCliente ? 'Conversa de alinhamento' : 'Primeira conversa';
     if (nome.length < 2) return json({ erro: 'Escreva seu nome.' }, 400);
     if (!EMAIL.test(email)) return json({ erro: 'Confira o e-mail: é por ele que chega o convite.' }, 400);
     const ip = (req.headers.get('x-forwarded-for') || '').split(',')[0].trim() || null;
@@ -138,8 +139,8 @@ Deno.serve(async req => {
     const r = await fetch(evUrl(g.profissional) + '?conferenceDataVersion=1&sendUpdates=all', { method: 'POST',
       headers: { Authorization: 'Bearer ' + g.token, 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        summary: `Primeira conversa · ${nome}${empresa ? ` (${empresa})` : ''}`,
-        description: [`Agendado pelo site rovyacreative.com.br/agendar.`, `E-mail: ${email}`, telefone && `WhatsApp: ${telefone}`, empresa && `Marca/empresa: ${empresa}`, mensagem && `\nO que busca:\n${mensagem}`].filter(Boolean).join('\n'),
+        summary: `${assunto} · ${nome}${empresa ? ` (${empresa})` : ''}`,
+        description: [`Agendado pelo site rovyacreative.com.br/agendar${jaCliente ? ' (já é cliente)' : ''}.`, `E-mail: ${email}`, telefone && `WhatsApp: ${telefone}`, empresa && `Marca/empresa: ${empresa}`, mensagem && `\nO que busca:\n${mensagem}`].filter(Boolean).join('\n'),
         start: { dateTime: slot.inicio }, end: { dateTime: slot.fim },
         attendees: [{ email, displayName: nome }],
         conferenceData: { createRequest: { requestId: ag.id, conferenceSolutionKey: { type: 'hangoutsMeet' } } },
@@ -153,11 +154,12 @@ Deno.serve(async req => {
     }
     await db.from('crm_agendamentos').update({ evento_id: ev.id, cliente_id: cli?.id ?? null }).eq('id', ag.id);
     if (cli?.id) {
-      await db.from('crm_interacoes').insert({ cliente_id: cli.id, tipo: 'nota', resumo: `Agendou pelo site: primeira conversa em ${quando}.${mensagem ? `\n\nO que busca: ${mensagem}` : ''}` });
-      const { data: aberta } = await db.from('crm_oportunidades').select('id').eq('cliente_id', cli.id).not('etapa', 'in', '(ganho,perdido)').limit(1).maybeSingle();
+      await db.from('crm_interacoes').insert({ cliente_id: cli.id, tipo: 'nota', resumo: `Agendou pelo site: ${assunto.toLowerCase()} em ${quando}.${mensagem ? `\n\nO que busca: ${mensagem}` : ''}` });
+      // quem já é cliente não vira oportunidade nova no Funil
+      const aberta = jaCliente || (await db.from('crm_oportunidades').select('id').eq('cliente_id', cli.id).not('etapa', 'in', '(ganho,perdido)').limit(1).maybeSingle()).data;
       if (!aberta) await db.from('crm_oportunidades').insert({ cliente_id: cli.id, titulo: 'Primeira conversa (agenda do site)', etapa: 'contato', proximo_passo: 'Primeira conversa', proximo_em: slot.inicio.slice(0, 10) });
     }
-    await avisar('Novo agendamento pelo site ✦', `${nome}${empresa ? ` (${empresa})` : ''} · ${quando}`, 'app.html#/agenda');
+    await avisar('Novo agendamento pelo site ✦', `${assunto} · ${nome}${empresa ? ` (${empresa})` : ''} · ${quando}`, 'app.html#/agenda');
 
     return json({ ok: true, inicio: slot.inicio, fim: slot.fim, quando, meet: ev.hangoutLink ?? null });
   } catch (e) {

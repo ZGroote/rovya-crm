@@ -1117,9 +1117,13 @@ function animarSabrina(raiz) {
   const img = raiz.querySelector('.sab-base'); if (!img || matchMedia('(prefers-reduced-motion: reduce)').matches) return;
   const safari = /^((?!chrome|chromium|android|crios|fxios|edg).)*safari/i.test(navigator.userAgent);
   if (safari || !document.createElement('video').canPlayType('video/webm; codecs="vp9"')) return img.classList.add('sab-flutua');
-  const v = Object.assign(document.createElement('video'), { muted: true, loop: true, autoplay: true, playsInline: true, src: 'img/sabrina-aceno.webm', className: 'sab-base' });
-  v.disablePictureInPicture = true; v.setAttribute('aria-hidden', 'true');
-  v.addEventListener('playing', () => img.replaceWith(v), { once: true }); v.play().catch(() => img.classList.add('sab-flutua'));
+  // o vídeo fica fora da página e é desenhado num canvas: com <video> na tela o Opera põe o botão "pop-out" em cima da cabeça dela
+  const v = Object.assign(document.createElement('video'), { muted: true, loop: true, playsInline: true, src: 'img/sabrina-aceno.webm' });
+  const c = Object.assign(document.createElement('canvas'), { className: 'sab-base' }), g = c.getContext('2d');
+  c.setAttribute('aria-hidden', 'true');
+  const quadro = () => { if (!c.isConnected) return v.pause(); g.clearRect(0, 0, c.width, c.height); g.drawImage(v, 0, 0, c.width, c.height); requestAnimationFrame(quadro); }; // saiu da tela: para
+  v.addEventListener('playing', () => { c.width = v.videoWidth; c.height = v.videoHeight; img.replaceWith(c); quadro(); }, { once: true });
+  v.play().catch(() => img.classList.add('sab-flutua'));
 }
 let canto;
 function fecharSabrina() { canto?.classList.remove('aberta'); canto?.querySelector('.sab-bt').setAttribute('aria-expanded', 'false'); }

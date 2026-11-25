@@ -181,7 +181,7 @@ dialog .dupla{display:grid;grid-template-columns:1fr 1fr;gap:12px}
 @media (max-width:760px){.acao-ia{max-width:100%}}
 /* a Sabrina: avatar (poses em img/sabrina-*.webp, mesma tela, o rosto não pula) */
 .sab{position:relative;display:block;width:100%;height:100%}
-.sab img,.sab video{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;object-position:bottom;display:block;transition:opacity .22s}
+.sab img,.sab canvas{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;object-position:bottom;display:block;transition:opacity .22s}
 .sab .sab-pose{opacity:0}
 .sab.com-pose .sab-pose{opacity:1;animation:sab-pop .45s cubic-bezier(.2,1.4,.4,1)}
 .sab.com-pose .sab-base{opacity:0}

@@ -100,7 +100,7 @@ ok(JSON.stringify(e.attendees) === JSON.stringify([{ email: 'ana@exemplo.com', d
 ok(e.extendedProperties.private.crm_cliente === 'c1' && T.crm_clientes.length === 1, 'achou a cliente que já existia pelo e-mail (sem diferenciar maiúsculas)');
 ok(T.crm_agendamentos[0].evento_id === 'novo0' && T.crm_agendamentos[0].cliente_id === 'c1', 'agendamento guardado com o evento e a cliente');
 ok(T.crm_interacoes.length === 1 && T.crm_interacoes[0].resumo.includes('reposicionar') && T.crm_oportunidades.length === 1 && T.crm_oportunidades[0].etapa === 'contato', 'histórico e oportunidade no funil criados');
-ok(avisos.length === 1 && avisos[0].cron === 'k' && avisos[0].aviso.corpo.startsWith('Ana Lima (Lima Doces)'), 'Sabrina recebe o aviso no celular');
+ok(avisos.length === 1 && avisos[0].cron === 'k' && avisos[0].aviso.corpo.startsWith('Primeira conversa · Ana Lima (Lima Doces)'), 'Sabrina recebe o aviso no celular');
 h = await chamar({ acao: 'horarios' });
 ok(h.horarios.length === 0, 'depois de marcado, o horário some da lista');
 
@@ -148,6 +148,12 @@ h = await chamar({ acao: 'horarios' }, '9.9.9.1');
 ok(JSON.stringify(h.horarios.map(x => x.inicio)) === JSON.stringify([BR(5, '09:00')]), `só a hora Rovya livre aparece (10h é BNI, 11h é Pessoal; BNI e Pessoal sozinhos nunca aparecem) → ${h.horarios.map(x => x.inicio).join(', ')}`);
 ok((await chamar({ acao: 'reservar', inicio: BR(5, '10:00'), nome: 'Bia', email: 'bia@exemplo.com' }, '9.9.9.2')).status === 409, 'não dá para reservar no horário do BNI, nem mandando direto para a função');
 ok((await chamar({ acao: 'reservar', inicio: BR(6, '14:00'), nome: 'Bia', email: 'bia@exemplo.com' }, '9.9.9.3')).status === 409, 'nem no horário Pessoal');
+
+// 5) quem já é cliente marca uma conversa de alinhamento: título próprio e nada de oportunidade nova no Funil
+const nOp = T.crm_oportunidades.length;
+r = await chamar({ acao: 'reservar', inicio: BR(5, '09:00'), nome: 'Carla Melo', email: 'carla@exemplo.com', cliente: true }, '9.9.9.4');
+ok(r.ok && criados.at(-1).summary === 'Conversa de alinhamento · Carla Melo' && T.crm_oportunidades.length === nOp
+  && T.crm_interacoes.at(-1).resumo.startsWith('Agendou pelo site: conversa de alinhamento'), 'cliente: conversa de alinhamento, sem oportunidade nova no Funil');
 
 console.log('ERROS:', erros.length ? erros : 'nenhum');
 process.exit(erros.length ? 1 : 0);
