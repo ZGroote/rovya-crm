@@ -68,7 +68,9 @@ with sync_playwright() as p:
     ok(pg.text_content('#frase') == FRASES[hoje % 7], 'frase do dia embaixo do Olá (gira pelas 7 frases, uma por dia): ' + pg.text_content('#frase'))
     ok(pg.locator('.abas .on').get_attribute('data-a') == 'aprovar' and pg.inner_text('.abas [data-a=aprovar] b') == '2', 'abre em "Para aprovar" com 2 pendentes')
     card = pg.locator('#aba article').first
-    ok(card.locator('b.tit').inner_text() == 'Legenda' and card.locator('.imgs img').count() == 1 and card.locator('.arqs a').inner_text() == 'Plano.pdf', 'mostra texto, imagem e arquivo da entrega')
+    ok(card.locator('b.tit').inner_text() == 'Legenda' and card.locator('.imgs img').count() == 1 and card.locator('.arqs a:not(.baixar)').inner_text() == 'Plano.pdf', 'mostra texto, imagem e arquivo da entrega')
+    bx = [card.locator('a.baixar').nth(i).get_attribute('href') for i in range(card.locator('a.baixar').count())]
+    ok(bx == ['data:image/png;base64,iVBORw0KGgo=?download=post.png', 'https://assinada/plano.pdf?download=Plano.pdf'], 'botão Baixar em cada imagem e arquivo, com ?download= no link assinado: ' + str(bx))
     ok(card.locator('a.btn').get_attribute('href') == 'https://canva.com/x' and pg.locator('#aba article').nth(1).locator('a.btn').count() == 0, 'link https vira botão; link javascript: é ignorado')
     pg.screenshot(path='testes/saida/portal_aprovar.png', full_page=True)
     card.locator('[data-aprovar]').click(); pg.wait_for_function("document.querySelectorAll('#aba article').length === 1")
